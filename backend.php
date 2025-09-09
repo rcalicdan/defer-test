@@ -15,7 +15,6 @@ function submitBackgroundTask()
 
     flash("success", "submitted succesfully");
     header("Location: /test.php", true, 301);
-    exit;
 }
 
 match ($_SERVER["REQUEST_METHOD"]) {
