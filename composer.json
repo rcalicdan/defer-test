@@ -3,5 +3,8 @@
         "psr-4": {
             "Library\\": "lib/"
         }
+    },
+    "require": {
+        "opis/closure": "^4.3"
     }
 }
