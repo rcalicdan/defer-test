@@ -8,6 +8,9 @@ use Library\Defer\Serialization\SerializationException;
 /**
  * Handles background process execution for deferred tasks with comprehensive logging and monitoring
  */
+/**
+ * Handles background process execution for deferred tasks with comprehensive logging and monitoring
+ */
 class BackgroundProcessExecutorHandler
 {
     private CallbackSerializationManager $serializationManager;
@@ -16,6 +19,8 @@ class BackgroundProcessExecutorHandler
     private string $logFile;
     private bool $enableDetailedLogging;
     private array $taskRegistry = [];
+
+    private array $frameworkInfo = [];
 
     public function __construct(
         ?CallbackSerializationManager $serializationManager = null,
@@ -26,10 +31,16 @@ class BackgroundProcessExecutorHandler
         $this->tempDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'defer_tasks';
         $this->logDir = $customLogDir ?: (sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'defer_logs');
         $this->logFile = $this->logDir . DIRECTORY_SEPARATOR . 'background_tasks.log';
+
         $this->enableDetailedLogging = $enableDetailedLogging;
+        $this->frameworkInfo = $this->detectFramework();
 
         $this->ensureDirectories();
         $this->initializeLogging();
+
+        if ($this->enableDetailedLogging) {
+            $this->logEvent('INFO', 'Detected framework: ' . ($this->frameworkInfo['name'] ?? 'none'));
+        }
     }
 
     /**
@@ -433,6 +444,7 @@ class BackgroundProcessExecutorHandler
             'log_dir' => $this->logDir,
             'php_binary' => $this->getPhpBinary(),
             'logging_enabled' => $this->enableDetailedLogging,
+            'framework' => $this->frameworkInfo,
             'serialization' => [
                 'available_serializers' => $this->serializationManager->getSerializerInfo(),
             ],
@@ -640,9 +652,14 @@ class BackgroundProcessExecutorHandler
         string $serializedCallback,
         string $serializedContext,
         string $autoloadPath,
-        string $statusFile
+        string $statusFile,
+        ?string $laravelBootstrapFile = null
     ): string {
         $generatedAt = date('Y-m-d H:i:s');
+        $frameworkName = $this->frameworkInfo['name'] ?? 'none';
+        $frameworkBootstrap = $this->frameworkInfo['bootstrap_file'] ?? '';
+        $frameworkInitCode = $this->frameworkInfo['init_code'] ?? '';
+        $escapedBootstrapFile = addslashes($frameworkBootstrap);
 
         return <<<PHP
 <?php
@@ -721,10 +738,29 @@ try {
     
     // Load autoloader
     if (file_exists('{$autoloadPath}')) {
-        require_once '{$autoloadPath}';
+         require_once '{$autoloadPath}';
         updateTaskStatus('RUNNING', 'Autoloader loaded successfully');
     } else {
         throw new RuntimeException('Autoloader not found at: {$autoloadPath}');
+    }
+
+    // Load framework bootstrap if detected
+    \$frameworkLoaded = false;
+    if ('{$frameworkName}' !== 'none' && '{$escapedBootstrapFile}' !== '') {
+        \$bootstrapFile = '{$escapedBootstrapFile}';
+        
+        if (file_exists(\$bootstrapFile)) {
+            try {
+                {$frameworkInitCode}
+                \$frameworkLoaded = true;
+                updateTaskStatus('RUNNING', '{$frameworkName} framework bootstrap loaded successfully');
+            } catch (Throwable \$bootstrapError) {
+                error_log("⚠️ Framework bootstrap failed: " . \$bootstrapError->getMessage());
+                updateTaskStatus('RUNNING', 'Framework bootstrap failed, continuing without framework: ' . \$bootstrapError->getMessage());
+            }
+        } else {
+            updateTaskStatus('RUNNING', 'Framework bootstrap file not found, continuing without framework');
+        }
     }
     
     // Load session management if available (for framework integration)
@@ -826,6 +862,149 @@ PHP;
         }
 
         return 'vendor/autoload.php'; // Fallback
+    }
+
+    /**
+     * Detect the current framework and return bootstrap information
+     *
+     * @return array Framework information with bootstrap path and initialization code
+     */
+    private function detectFramework(): array
+    {
+        $frameworks = [
+            'laravel' => [
+                'bootstrap_files' => [
+                    'bootstrap/app.php',
+                    '../bootstrap/app.php',
+                    '../../bootstrap/app.php',
+                    '../../../bootstrap/app.php',
+                    '../../../../bootstrap/app.php',
+                ],
+                'detector_files' => ['artisan', 'app/Http/Kernel.php'],
+                'init_code' => '
+                $app = require $bootstrapFile;
+                $kernel = $app->make(Illuminate\Contracts\Console\Kernel::class);
+                $kernel->bootstrap();'
+            ],
+            'symfony' => [
+                'bootstrap_files' => [
+                    'config/bootstrap.php',
+                    '../config/bootstrap.php',
+                    '../../config/bootstrap.php',
+                    '../../../config/bootstrap.php',
+                    'public/index.php',
+                ],
+                'detector_files' => ['bin/console', 'symfony.lock', 'config/bundles.php'],
+                'init_code' => '
+                if (basename($bootstrapFile) === "index.php") {
+                    // For Symfony apps without separate bootstrap
+                    $_SERVER["APP_ENV"] = $_SERVER["APP_ENV"] ?? "prod";
+                    require $bootstrapFile;
+                } else {
+                    require $bootstrapFile;
+                    if (class_exists("Symfony\Component\Dotenv\Dotenv")) {
+                        (new Symfony\Component\Dotenv\Dotenv())->bootEnv(dirname($bootstrapFile, 2)."/.env");
+                    }
+                }'
+            ],
+            'codeigniter' => [
+                'bootstrap_files' => [
+                    'system/CodeIgniter.php',
+                    '../system/CodeIgniter.php',
+                    'app/Config/Boot/production.php',
+                    'app/Config/Boot/development.php',
+                ],
+                'detector_files' => ['system/CodeIgniter.php', 'app/Config/App.php'],
+                'init_code' => '
+                if (strpos($bootstrapFile, "CodeIgniter.php") !== false) {
+                    define("ENVIRONMENT", $_ENV["CI_ENVIRONMENT"] ?? "production");
+                    require $bootstrapFile;
+                } else {
+                    require $bootstrapFile;
+                }'
+            ],
+            'cakephp' => [
+                'bootstrap_files' => [
+                    'config/bootstrap.php',
+                    '../config/bootstrap.php',
+                    '../../config/bootstrap.php',
+                ],
+                'detector_files' => ['bin/cake', 'config/app_local.php'],
+                'init_code' => '
+                require $bootstrapFile;'
+            ],
+            'zend' => [
+                'bootstrap_files' => [
+                    'config/application.config.php',
+                    'public/index.php',
+                ],
+                'detector_files' => ['module/Application', 'config/application.config.php'],
+                'init_code' => '
+                if (basename($bootstrapFile) === "index.php") {
+                    $_SERVER["REQUEST_URI"] = "/";
+                    $_SERVER["REQUEST_METHOD"] = "GET";
+                }
+                require $bootstrapFile;'
+            ]
+        ];
+
+        foreach ($frameworks as $name => $config) {
+            // Check if framework detector files exist
+            foreach ($config['detector_files'] as $detectorFile) {
+                $possiblePaths = [
+                    $detectorFile,
+                    '../' . $detectorFile,
+                    '../../' . $detectorFile,
+                    '../../../' . $detectorFile,
+                    getcwd() . '/' . $detectorFile,
+                    dirname($_SERVER['SCRIPT_FILENAME'] ?? __FILE__) . '/' . $detectorFile,
+                ];
+
+                foreach ($possiblePaths as $path) {
+                    if (file_exists($path)) {
+                        $bootstrapFile = $this->findFrameworkBootstrap($config['bootstrap_files']);
+                        if ($bootstrapFile) {
+                            return [
+                                'name' => $name,
+                                'bootstrap_file' => $bootstrapFile,
+                                'init_code' => $config['init_code']
+                            ];
+                        }
+                    }
+                }
+            }
+        }
+
+        return ['name' => 'none', 'bootstrap_file' => null, 'init_code' => ''];
+    }
+
+    /**
+     * Find framework bootstrap file from possible paths
+     *
+     * @param array $possibleFiles Array of possible bootstrap file paths
+     * @return string|null Path to bootstrap file or null if not found
+     */
+    private function findFrameworkBootstrap(array $possibleFiles): ?string
+    {
+        $basePaths = [
+            getcwd(),
+            dirname($_SERVER['SCRIPT_FILENAME'] ?? __FILE__),
+            __DIR__ . '/../..',
+            __DIR__ . '/../../..',
+            __DIR__ . '/../../../..',
+            __DIR__ . '/../../../../..',
+        ];
+
+        foreach ($basePaths as $basePath) {
+            foreach ($possibleFiles as $file) {
+                $fullPath = $basePath . '/' . $file;
+                if (file_exists($fullPath)) {
+                    return realpath($fullPath);
+                }
+            }
+        }
+
+        return null;
     }
 
     /**
