@@ -45,7 +45,7 @@ class ProcessDeferHandler
     {
         $this->registerShutdownHandlers();
         $this->serializationManager = new CallbackSerializationManager();
-        $this->backgroundExecutor = new BackgroundProcessExecutorHandler($this->serializationManager);
+        $this->backgroundExecutor = new BackgroundProcessExecutorHandler($this->serializationManager, true, 'test/log.txt');
     }
 
     /**
@@ -69,26 +69,6 @@ class ProcessDeferHandler
     }
 
     /**
-     * Add a terminate callback to be executed after response is sent
-     * Now supports true background execution via separate PHP process
-     *
-     * @param callable $callback The callback to execute after response
-     * @param bool $forceBackground Force background execution even in FastCGI environments
-     * @param array $context Additional context data to pass to background task
-     */
-    public function terminate(callable $callback, bool $forceBackground = false, array $context = []): void
-    {
-        // Check if we should use background process execution
-        if ($forceBackground || $this->shouldUseBackgroundExecution()) {
-            $this->executeInBackground($callback, $context);
-        } else {
-            // Use traditional FastCGI method if available
-            $this->addToTerminateStack($callback);
-            $this->registerTerminateHandlers();
-        }
-    }
-
-    /**
      * Determine if we should use background process execution
      *
      * @return bool True if background execution should be used
@@ -102,21 +82,84 @@ class ProcessDeferHandler
     }
 
     /**
-     * Execute callback in a true background process
-     *
-     * @param callable $callback The callback to execute
-     * @param array $context Additional context data
+     * Add a terminate callback with optional background execution and monitoring
      */
-    private function executeInBackground(callable $callback, array $context = []): void
+    public function terminate(callable $callback, bool $forceBackground = false, array $context = []): ?string
+    {
+        // Check if we should use background process execution
+        if ($forceBackground || $this->shouldUseBackgroundExecution()) {
+            return $this->executeInBackground($callback, $context);
+        } else {
+            // Use traditional FastCGI method if available
+            $this->addToTerminateStack($callback);
+            $this->registerTerminateHandlers();
+            return null; // No task ID for traditional execution
+        }
+    }
+
+    /**
+     * Execute callback in background and return task ID
+     */
+    public function executeBackground(callable $callback, array $context = []): string
+    {
+        return $this->executeInBackground($callback, $context);
+    }
+
+    /**
+     * Updated executeInBackground to return task ID
+     */
+    private function executeInBackground(callable $callback, array $context = []): string
     {
         try {
-            $this->backgroundExecutor->execute($callback, $context);
+            $taskId = $this->backgroundExecutor->execute($callback, $context);
+            return $taskId;
         } catch (\Throwable $e) {
             error_log('Background execution failed, falling back to shutdown function: ' . $e->getMessage());
             // Fallback to shutdown function
             $this->addToTerminateStack($callback);
             $this->registerTerminateHandlers();
+            throw $e; // Re-throw to indicate background execution failed
         }
+    }
+
+    /**
+     * Delegate to background executor
+     */
+    public function getTaskStatus(string $taskId): array
+    {
+        return $this->backgroundExecutor->getTaskStatus($taskId);
+    }
+
+    /**
+     * Delegate to background executor
+     */
+    public function getAllTasksStatus(): array
+    {
+        return $this->backgroundExecutor->getAllTasksStatus();
+    }
+
+    /**
+     * Delegate to background executor
+     */
+    public function getTasksSummary(): array
+    {
+        return $this->backgroundExecutor->getTasksSummary();
+    }
+
+    /**
+     * Delegate to background executor
+     */
+    public function getRecentLogs(int $limit = 100): array
+    {
+        return $this->backgroundExecutor->getRecentLogs($limit);
+    }
+
+    /**
+     * Delegate to background executor
+     */
+    public function cleanupOldTasks(int $maxAgeHours = 24): int
+    {
+        return $this->backgroundExecutor->cleanupOldTasks($maxAgeHours);
     }
 
     /**
