@@ -1,22 +1,33 @@
-<!DOCTYPE html>
-<html lang="en">
+<?php
 
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Document</title>
-</head>
+use Library\Defer\Defer;
 
-<body>
-    <?php
-    require 'session.php';
-    if ($msg = flash('success')) {
-        echo "<p style='color: green;'>{$msg}</p>";
+require 'vendor/autoload.php';
+
+$tasks = [
+    'task1' => Defer::background(function () {
+        sleep(1);
+        return 'Task 1 completed';
+    }),
+    'task2' => Defer::background(function () {
+        sleep(1);
+        throw new Exception('Task 2 failed');
+    }),
+    'task3' => Defer::background(function () {
+        sleep(1);
+        return 'Task 3 completed';
+    }),
+];
+
+$start_time = microtime(true);
+
+$results = Defer::awaitTaskAllSettled($tasks);
+echo "Execution Time: " . (microtime(true) - $start_time) . " seconds\n";
+
+foreach ($results as $key => $result) {
+    if ($result['status'] === 'fulfilled') {
+        echo "{$key}: ✅ {$result['value']}\n";
+    } else {
+        echo "{$key}: ❌ {$result['reason']}\n";
     }
-    ?>
-    <form action="/backend.php" method="POST">
-        <button type="submit">Submit</button>
-    </form>
-</body>
-
-</html>
+}

@@ -4,6 +4,7 @@ namespace Library\Defer;
 
 use Library\Defer\Handlers\ProcessDeferHandler;
 use Library\Defer\Utilities\DeferInstance;
+use Library\Defer\Utilities\TaskAwaiter;
 
 /**
  * Static defer utility with reliable function scope management and background task monitoring
@@ -234,6 +235,31 @@ class Defer
         }
 
         throw new \RuntimeException("Task {$taskId} ended with unexpected status: " . $finalStatus['status']);
+    }
+
+    /**
+     * Wait for multiple tasks to complete and return their results
+     * 
+     * @param array $taskIds Array of task IDs to wait for (keys are preserved in result)
+     * @param int $timeoutSeconds Maximum time to wait for all tasks
+     * @return array Task results with preserved keys, or null for failed tasks
+     * @throws \RuntimeException If any task fails or times out
+     */
+    public static function awaitTaskAll(array $taskIds, int $timeoutSeconds = 60): array
+    {
+        return TaskAwaiter::awaitAll($taskIds, $timeoutSeconds);
+    }
+
+    /**
+     * Wait for multiple tasks to complete and return all results (settled version)
+     * 
+     * @param array $taskIds Array of task IDs to wait for (keys are preserved in result)
+     * @param int $timeoutSeconds Maximum time to wait for all tasks
+     * @return array Task results with preserved keys. Each result has 'status' and either 'value' or 'reason'
+     */
+    public static function awaitTaskAllSettled(array $taskIds, int $timeoutSeconds = 60): array
+    {
+        return TaskAwaiter::awaitAllSettled($taskIds, $timeoutSeconds);
     }
 
     /**
