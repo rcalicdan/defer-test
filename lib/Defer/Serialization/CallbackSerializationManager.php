@@ -65,7 +65,6 @@ class CallbackSerializationManager
                 try {
                     return $serializer->serialize($callback);
                 } catch (SerializationException $e) {
-                    // Try next serializer
                     continue;
                 }
             }

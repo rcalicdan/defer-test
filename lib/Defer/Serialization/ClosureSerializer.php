@@ -2,21 +2,20 @@
 
 namespace Library\Defer\Serialization;
 
-/**
- * Serializes closure callbacks using opis/closure
- */
+use function Opis\Closure\serialize as opisSerialize;
+
 class ClosureSerializer implements CallbackSerializerInterface
 {
-    private bool $opisCleusureAvailable;
+    private bool $opisClosureAvailable;
 
     public function __construct()
     {
-        $this->opisCleusureAvailable = class_exists('Opis\\Closure\\SerializableClosure');
+        $this->opisClosureAvailable = function_exists('Opis\\Closure\\serialize');
     }
 
     public function canSerialize(callable $callback): bool
     {
-        return $callback instanceof \Closure && $this->opisCleusureAvailable;
+        return $callback instanceof \Closure && $this->opisClosureAvailable;
     }
 
     public function serialize(callable $callback): string
@@ -26,9 +25,8 @@ class ClosureSerializer implements CallbackSerializerInterface
         }
 
         try {
-            $wrapper = new \Opis\Closure\SerializableClosure($callback);
-            $serialized = serialize($wrapper);
-            return sprintf('unserialize(%s)', var_export($serialized, true));
+            $serialized = opisSerialize($callback);
+            return sprintf('\\Opis\\Closure\\unserialize(%s)', var_export($serialized, true));
         } catch (\Throwable $e) {
             throw new SerializationException('Failed to serialize closure: ' . $e->getMessage(), $e);
         }

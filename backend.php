@@ -9,7 +9,7 @@ use Library\Defer\Defer;
 function submitBackgroundTask()
 {
     Defer::terminate(function () {
-        sleep(5);
+        sleep(10);
         file_put_contents('hello world.txt', "test");
     });
 

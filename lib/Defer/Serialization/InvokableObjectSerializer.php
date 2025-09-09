@@ -11,14 +11,14 @@ class InvokableObjectSerializer implements CallbackSerializerInterface
 
     public function __construct()
     {
-        $this->serializationAvailable = class_exists('Opis\\Closure\\SerializableClosure');
+        $this->serializationAvailable = function_exists('Opis\\Closure\\serialize');;
     }
 
     public function canSerialize(callable $callback): bool
     {
-        return is_object($callback) && 
-               method_exists($callback, '__invoke') && 
-               $this->serializationAvailable;
+        return is_object($callback) &&
+            method_exists($callback, '__invoke') &&
+            $this->serializationAvailable;
     }
 
     public function serialize(callable $callback): string

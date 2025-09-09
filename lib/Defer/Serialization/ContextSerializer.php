@@ -26,17 +26,14 @@ class ContextSerializer
         if (empty($context)) {
             return '[]';
         }
-        
+
         try {
-            // Try var_export first (most reliable for simple data)
             $exported = var_export($context, true);
-            
-            // Validate syntax
+
             $this->validateSyntax($exported);
-            
+
             return $exported;
         } catch (\Throwable $e) {
-            // Fall back to serialize/unserialize for complex objects
             return $this->fallbackSerialization($context);
         }
     }
@@ -52,19 +49,18 @@ class ContextSerializer
         // Method 1: Try to evaluate the code in a safe way
         try {
             $testVar = null;
-            
+
             // Use eval to test syntax (safe because we're only testing var_export output)
             $evalResult = @eval("\$testVar = {$phpCode}; return true;");
-            
+
             if ($evalResult === false) {
                 throw new SerializationException('Generated PHP code has syntax errors');
             }
-            
+
             // Additional validation: ensure the result is the same type
             if (!is_array($testVar)) {
                 throw new SerializationException('Generated PHP code does not produce expected array type');
             }
-            
         } catch (\ParseError $e) {
             throw new SerializationException('PHP syntax error in generated code: ' . $e->getMessage());
         } catch (\Throwable $e) {
@@ -83,22 +79,21 @@ class ContextSerializer
     {
         // Method 2: Use token_get_all to validate syntax
         $fullCode = "<?php \$test = {$phpCode};";
-        
+
         try {
             $tokens = token_get_all($fullCode);
-            
+
             // Check for syntax errors by looking for T_INVALID tokens
             foreach ($tokens as $token) {
                 if (is_array($token) && isset($token[0]) && $token[0] === T_BAD_CHARACTER) {
                     throw new SerializationException('Invalid characters in generated PHP code');
                 }
             }
-            
+
             // Additional check: ensure we have proper array syntax
             if (!$this->hasValidArrayStructure($phpCode)) {
                 throw new SerializationException('Generated code does not have valid array structure');
             }
-            
         } catch (\Throwable $e) {
             // If token parsing fails, do basic string validation
             $this->basicSyntaxValidation($phpCode);
@@ -115,23 +110,23 @@ class ContextSerializer
     {
         // Basic structural checks for var_export array output
         $trimmed = trim($phpCode);
-        
+
         // Should start with 'array' keyword or '[' for short array syntax
         if (!preg_match('/^(array\s*\(|\[)/', $trimmed)) {
             return false;
         }
-        
+
         // Should end with closing parenthesis or bracket
         if (!preg_match('/(\)|\])$/', $trimmed)) {
             return false;
         }
-        
+
         // Count opening and closing brackets/parentheses
         $openParens = substr_count($phpCode, '(');
         $closeParens = substr_count($phpCode, ')');
         $openBrackets = substr_count($phpCode, '[');
         $closeBrackets = substr_count($phpCode, ']');
-        
+
         return ($openParens === $closeParens) && ($openBrackets === $closeBrackets);
     }
 
@@ -151,17 +146,17 @@ class ContextSerializer
             '/\beval\s*\(/',         // eval calls (security risk)
             '/\bexec\s*\(/',         // exec calls (security risk)
         ];
-        
+
         foreach ($invalidPatterns as $pattern) {
             if (preg_match($pattern, $phpCode)) {
                 throw new SerializationException('Generated PHP code contains potentially unsafe content');
             }
         }
-        
+
         // Check for balanced quotes
         $singleQuotes = substr_count($phpCode, "'") - substr_count($phpCode, "\\'");
         $doubleQuotes = substr_count($phpCode, '"') - substr_count($phpCode, '\\"');
-        
+
         if ($singleQuotes % 2 !== 0 || $doubleQuotes % 2 !== 0) {
             throw new SerializationException('Unbalanced quotes in generated PHP code');
         }
@@ -179,10 +174,10 @@ class ContextSerializer
         if (!$this->advancedSerializationAvailable) {
             throw new SerializationException('Context contains complex data that requires opis/closure');
         }
-        
+
         try {
-            $serialized = serialize($context);
-            return sprintf('unserialize(%s)', var_export($serialized, true));
+            $serialized = \Opis\Closure\serialize($context);
+            return sprintf('\\Opis\\Closure\\unserialize(%s)', var_export($serialized, true));
         } catch (\Throwable $e) {
             throw new SerializationException('Failed to serialize context data: ' . $e->getMessage(), $e);
         }
@@ -223,14 +218,13 @@ class ContextSerializer
             // Test var_export method
             $exported = var_export($context, true);
             $this->validateSyntax($exported);
-            
+
             $result['success'] = true;
             $result['method'] = 'var_export';
             $result['size'] = strlen($exported);
-            
         } catch (\Throwable $e) {
             $result['errors'][] = 'var_export failed: ' . $e->getMessage();
-            
+
             // Test fallback method
             try {
                 $fallback = $this->fallbackSerialization($context);
