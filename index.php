@@ -74,128 +74,21 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     echo "</div>";
 
 } else {
-    // Show comprehensive environment information
-    $stats = Defer::getStats();
-    
     echo "<div style='padding: 20px; font-family: Arial, sans-serif;'>";
-    echo "<h1>🔍 Defer Environment Diagnostics</h1>";
-    echo "<p>This page shows detailed environment information to diagnose defer functionality.</p>";
+    echo "<h1>Defer Terminate Test</h1>";
+    echo "<p>This test demonstrates Laravel-style defer functionality that executes <strong>after</strong> the HTTP response is sent.</p>";
     
-    // Basic PHP Environment
-    echo "<h3>📋 PHP Environment:</h3>";
-    echo "<div style='background: #f0f8ff; padding: 15px; border-radius: 5px; font-family: monospace; margin-bottom: 20px;'>";
-    echo "<strong>PHP Version:</strong> " . PHP_VERSION . "<br>";
+    // Show current environment info
+    $stats = Defer::getStats();
+    echo "<h3>Current Environment:</h3>";
+    echo "<div style='background: #f0f8ff; padding: 10px; border-radius: 5px; font-family: monospace;'>";
     echo "<strong>PHP SAPI:</strong> " . PHP_SAPI . "<br>";
-    echo "<strong>OS Family:</strong> " . PHP_OS_FAMILY . "<br>";
-    echo "<strong>OS:</strong> " . php_uname() . "<br>";
-    echo "<strong>Server Software:</strong> " . ($_SERVER['SERVER_SOFTWARE'] ?? 'Not Available') . "<br>";
-    echo "<strong>Gateway Interface:</strong> " . ($_SERVER['GATEWAY_INTERFACE'] ?? 'Not Available') . "<br>";
+    echo "<strong>FastCGI Available:</strong> " . (function_exists('fastcgi_finish_request') ? 'Yes' : 'No') . "<br>";
+    echo "<strong>OS:</strong> " . PHP_OS_FAMILY . "<br>";
+    echo "<strong>PHP Version:</strong> " . PHP_VERSION . "<br>";
     echo "</div>";
     
-    // FastCGI Detection
-    echo "<h3>🚀 FastCGI Detection:</h3>";
-    echo "<div style='background: #f0fff0; padding: 15px; border-radius: 5px; font-family: monospace; margin-bottom: 20px;'>";
-    echo "<strong>Current SAPI:</strong> " . PHP_SAPI . "<br>";
-    echo "<strong>Is FPM-FCGI:</strong> " . (PHP_SAPI === 'fpm-fcgi' ? '✅ Yes' : '❌ No') . "<br>";
-    echo "<strong>Is CGI-FCGI:</strong> " . (PHP_SAPI === 'cgi-fcgi' ? '✅ Yes' : '❌ No') . "<br>";
-    echo "<strong>fastcgi_finish_request() exists:</strong> " . (function_exists('fastcgi_finish_request') ? '✅ Yes' : '❌ No') . "<br>";
-    
-    // Check CGI environment variables
-    $cgiVars = [
-        'FCGI_ROLE' => $_SERVER['FCGI_ROLE'] ?? 'Not Set',
-        'SCRIPT_FILENAME' => $_SERVER['SCRIPT_FILENAME'] ?? 'Not Set',
-        'REQUEST_METHOD' => $_SERVER['REQUEST_METHOD'] ?? 'Not Set',
-        'CONTENT_TYPE' => $_SERVER['CONTENT_TYPE'] ?? 'Not Set',
-        'CONTENT_LENGTH' => $_SERVER['CONTENT_LENGTH'] ?? 'Not Set',
-    ];
-    
-    foreach ($cgiVars as $var => $value) {
-        echo "<strong>{$var}:</strong> {$value}<br>";
-    }
-    echo "</div>";
-    
-    // Output Buffering
-    echo "<h3>📤 Output Buffering:</h3>";
-    echo "<div style='background: #fff8dc; padding: 15px; border-radius: 5px; font-family: monospace; margin-bottom: 20px;'>";
-    echo "<strong>Current OB Level:</strong> " . ob_get_level() . "<br>";
-    echo "<strong>OB Status:</strong><br>";
-    $obStatus = ob_get_status(true);
-    if (empty($obStatus)) {
-        echo "  No output buffers active<br>";
-    } else {
-        foreach ($obStatus as $i => $buffer) {
-            echo "  Buffer {$i}: {$buffer['name']} (Level: {$buffer['level']}, Size: {$buffer['buffer_size']})<br>";
-        }
-    }
-    echo "<strong>Output Handler:</strong> " . (ini_get('output_handler') ?: 'None') . "<br>";
-    echo "<strong>Implicit Flush:</strong> " . (ini_get('implicit_flush') ? 'On' : 'Off') . "<br>";
-    echo "</div>";
-    
-    // Process Information
-    echo "<h3>⚙️ Process Information:</h3>";
-    echo "<div style='background: #ffe4e1; padding: 15px; border-radius: 5px; font-family: monospace; margin-bottom: 20px;'>";
-    echo "<strong>Process ID:</strong> " . (function_exists('getmypid') ? getmypid() : 'Not Available') . "<br>";
-    echo "<strong>Parent Process ID:</strong> " . (function_exists('posix_getppid') ? posix_getppid() : 'Not Available') . "<br>";
-    echo "<strong>User ID:</strong> " . (function_exists('posix_getuid') ? posix_getuid() : 'Not Available') . "<br>";
-    echo "<strong>Group ID:</strong> " . (function_exists('posix_getgid') ? posix_getgid() : 'Not Available') . "<br>";
-    echo "</div>";
-    
-    // Server Variables
-    echo "<h3>🌐 Server Variables (HTTP Related):</h3>";
-    echo "<div style='background: #f5f5dc; padding: 15px; border-radius: 5px; font-family: monospace; margin-bottom: 20px; max-height: 200px; overflow-y: auto;'>";
-    $httpVars = array_filter($_SERVER, function($key) {
-        return strpos($key, 'HTTP_') === 0 || 
-               in_array($key, ['REQUEST_URI', 'QUERY_STRING', 'REQUEST_TIME', 'REQUEST_TIME_FLOAT']);
-    }, ARRAY_FILTER_USE_KEY);
-    
-    foreach ($httpVars as $key => $value) {
-        echo "<strong>{$key}:</strong> " . htmlspecialchars($value) . "<br>";
-    }
-    echo "</div>";
-    
-    // Function Availability
-    echo "<h3>🔧 Function Availability:</h3>";
-    echo "<div style='background: #e6e6fa; padding: 15px; border-radius: 5px; font-family: monospace; margin-bottom: 20px;'>";
-    $functions = [
-        'fastcgi_finish_request',
-        'apache_setenv', 
-        'connection_aborted',
-        'connection_status',
-        'ignore_user_abort',
-        'register_shutdown_function',
-        'pcntl_signal',
-        'posix_getpid',
-        'posix_getppid',
-        'sapi_windows_set_ctrl_handler'
-    ];
-    
-    foreach ($functions as $func) {
-        $available = function_exists($func) ? '✅' : '❌';
-        echo "<strong>{$func}:</strong> {$available}<br>";
-    }
-    echo "</div>";
-    
-    // Defer Stats
-    echo "<h3>📊 Defer Library Stats:</h3>";
-    echo "<div style='background: #f0f0f0; padding: 15px; border-radius: 5px; font-family: monospace; margin-bottom: 20px;'>";
-    echo "<strong>Global Defers:</strong> " . $stats['global_defers'] . "<br>";
-    echo "<strong>Terminate Callbacks:</strong> " . $stats['terminate_callbacks'] . "<br>";
-    echo "<strong>Memory Usage:</strong> " . number_format($stats['memory_usage'] / 1024 / 1024, 2) . " MB<br>";
-    echo "<strong>Detected FastCGI:</strong> " . ($stats['environment']['fastcgi'] ? '✅ Yes' : '❌ No') . "<br>";
-    echo "<strong>fastcgi_finish_request Available:</strong> " . ($stats['environment']['fastcgi_finish_request'] ? '✅ Yes' : '❌ No') . "<br>";
-    echo "<strong>Output Buffering Active:</strong> " . ($stats['environment']['output_buffering'] ? '✅ Yes' : '❌ No') . "<br>";
-    echo "</div>";
-    
-    // Test Form
-    echo "<div class='form-container'>";
-    echo "<h3>🧪 Test Defer Functionality:</h3>";
-    echo "<p>Click the button below to test if terminate callbacks execute after the response is sent.</p>";
-    echo "<form method='post' onsubmit='startTiming()'>";
-    echo "<button type='submit'>🚀 Test Defer Terminate</button>";
-    echo "</form>";
-    echo "<div id='status'></div>";
-    echo "</div>";
-    
+    echo "<p><strong>Click submit to test:</strong></p>";
     echo "</div>";
 }
 
@@ -206,22 +99,20 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Defer Environment Diagnostics</title>
+    <title>Defer Terminate Test</title>
     <style>
         body {
             font-family: Arial, sans-serif;
-            max-width: 1000px;
+            max-width: 800px;
             margin: 0 auto;
             padding: 20px;
             line-height: 1.6;
-            background-color: #fafafa;
         }
         .form-container {
-            background: #fff;
+            background: #f9f9f9;
             padding: 20px;
             border-radius: 8px;
             margin: 20px 0;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
         }
         button {
             background: #007cba;
@@ -241,14 +132,6 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             border-radius: 5px;
             margin: 20px 0;
         }
-        h3 {
-            color: #333;
-            border-bottom: 2px solid #007cba;
-            padding-bottom: 5px;
-        }
-        .diagnostic-section {
-            margin-bottom: 25px;
-        }
     </style>
     <script>
         let startTime;
@@ -256,7 +139,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         function startTiming() {
             startTime = Date.now();
             document.getElementById('status').innerHTML = 
-                '<div style="color: #666;">⏳ Request sent at ' + new Date().toLocaleTimeString() + ', waiting for response...</div>';
+                '<div style="color: #666;">⏳ Request sent, waiting for response...</div>';
         }
         
         window.onload = function() {
@@ -266,26 +149,24 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
             
             document.getElementById('timing-result').innerHTML = 
                 '<div class="timing-info">' +
-                '<h4>✅ Response Timing Analysis</h4>' +
-                '<p><strong>Response received at:</strong> ' + new Date().toLocaleTimeString() + '</p>' +
-                '<p>If you see this response <strong>immediately</strong> (not after 5 seconds), then the defer mechanism has a problem.</p>' +
-                '<p><strong>Expected behavior:</strong> Immediate response, background task runs separately.</p>' +
+                '<h4>✅ Response Timing Verified!</h4>' +
+                '<p>This response was received <strong>immediately</strong>, not after the 5-second sleep.</p>' +
+                '<p>The background task is running separately and will complete in ~5+ seconds.</p>' +
                 '</div>';
             
-            // Countdown timer for file check
-            let countdown = 8;
+            // Show a countdown for when to check the file
+            let countdown = 6;
             const countdownElement = document.createElement('div');
-            countdownElement.style.cssText = 'background: #fff3cd; padding: 15px; border-radius: 5px; margin: 15px 0; border: 1px solid #ffeaa7;';
+            countdownElement.style.cssText = 'background: #fff3cd; padding: 10px; border-radius: 5px; margin: 10px 0;';
             document.body.appendChild(countdownElement);
             
             const timer = setInterval(() => {
                 countdown--;
                 if (countdown > 0) {
-                    countdownElement.innerHTML = `<strong>⏰ Check txt.txt file in ${countdown} seconds...</strong><br><small>The background task should create this file after the 5-second delay.</small>`;
+                    countdownElement.innerHTML = `<strong>⏰ Check txt.txt file in ${countdown} seconds...</strong>`;
                 } else {
-                    countdownElement.innerHTML = '<strong>🔍 Check txt.txt file now!</strong><br><small>If the file exists, the terminate callback executed successfully.</small>';
+                    countdownElement.innerHTML = '<strong>🔍 Check txt.txt file now! It should have been created.</strong>';
                     countdownElement.style.background = '#d4edda';
-                    countdownElement.style.borderColor = '#c3e6cb';
                     clearInterval(timer);
                 }
             }, 1000);
@@ -294,17 +175,24 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     </script>
 </head>
 <body>
+    <div class="form-container">
+        <form method="post" onsubmit="startTiming()">
+            <button type="submit">🚀 Test Defer Terminate</button>
+        </form>
+        <div id="status"></div>
+    </div>
+    
     <div id="timing-result"></div>
     
-    <div style="background: #e7f3ff; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #007cba;">
-        <h4>🔍 Diagnostic Information</h4>
-        <p>This page shows comprehensive environment details to help diagnose why defer terminate callbacks might not be working as expected.</p>
-        <p><strong>Key things to look for:</strong></p>
-        <ul>
-            <li><strong>FastCGI Environment:</strong> Should be "Yes" for proper defer functionality</li>
-            <li><strong>fastcgi_finish_request:</strong> Should be "Available"</li>
-            <li><strong>Response Timing:</strong> Should be immediate, not delayed by background tasks</li>
-        </ul>
+    <div style="background: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0; font-size: 14px;">
+        <h4>How to Verify It's Working:</h4>
+        <ol>
+            <li><strong>Immediate Response:</strong> You should see the response instantly (not after 5 seconds)</li>
+            <li><strong>Background Execution:</strong> The <code>txt.txt</code> file will appear in ~5-8 seconds</li>
+            <li><strong>Check Error Log:</strong> Detailed timing information will be logged</li>
+        </ol>
+        
+        <p><strong>💡 Tip:</strong> Open your browser's developer tools (F12) and watch the Network tab to see the actual response time.</p>
     </div>
 </body>
 </html>
