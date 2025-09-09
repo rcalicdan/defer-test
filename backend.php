@@ -4,13 +4,19 @@ require 'vendor/autoload.php';
 require 'session.php';
 
 use Library\Defer\Defer;
-
+use Rcalicdan\FiberAsync\Api\DB;
+use Rcalicdan\FiberAsync\Api\File;
+use Rcalicdan\FiberAsync\Api\Task;
 
 function submitBackgroundTask()
 {
     Defer::terminate(function () {
-        sleep(10);
-        file_put_contents('hello world.txt', "test");
+        sleep(5);
+        Task::run(function () {
+           await(DB::rawExecute("CREATE TABLE IF NOT EXISTS `test` (`id` int(11) NOT NULL AUTO_INCREMENT, `name` varchar(255) NOT NULL, PRIMARY KEY (`id`))"));
+
+           await(DB::table('test')->insert(['name' => 'test']));
+        });
     });
 
     flash("success", "submitted succesfully");

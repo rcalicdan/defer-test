@@ -1,0 +1,16 @@
+{
+    "task_id": "defer_20250909_082541_68bfe48573a779.92343460",
+    "status": "COMPLETED",
+    "message": "Task completed successfully in 5.017 seconds",
+    "timestamp": 1757406346,
+    "duration": 5.016942024230957,
+    "memory_usage": 2097152,
+    "memory_peak": 2097152,
+    "pid": 17496,
+    "created_at": "2025-09-09 08:25:41",
+    "updated_at": "2025-09-09 08:25:46",
+    "php_version": "8.4.5",
+    "os_family": "Windows",
+    "execution_time": 5.016935110092163,
+    "memory_final": 2097152
+}

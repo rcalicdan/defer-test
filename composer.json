@@ -5,6 +5,7 @@
         }
     },
     "require": {
-        "opis/closure": "^4.3"
+        "opis/closure": "^4.3",
+        "rcalicdan/fiber-async": "dev-main"
     }
 }

@@ -1,0 +1,19 @@
+{
+    "task_id": "defer_20250909_083821_68bfe77de05a80.51902907",
+    "status": "ERROR",
+    "message": "Task failed: PDO Connection failed: SQLSTATE[HY000] [14] unable to open database file",
+    "timestamp": 1757407107,
+    "duration": 5.0415849685668945,
+    "memory_usage": 4194304,
+    "memory_peak": 4194304,
+    "pid": 25684,
+    "created_at": "2025-09-09 08:38:21",
+    "updated_at": "2025-09-09 08:38:27",
+    "php_version": "8.4.5",
+    "os_family": "Windows",
+    "error_message": "PDO Connection failed: SQLSTATE[HY000] [14] unable to open database file",
+    "error_file": "C:\\wamp64\\package\\defer-test\\vendor\\rcalicdan\\fiber-async\\src\\PDO\\AsyncPdoPool.php",
+    "error_line": 323,
+    "error_code": 14,
+    "stack_trace": "#0 C:\\wamp64\\package\\defer-test\\vendor\\rcalicdan\\fiber-async\\src\\PDO\\AsyncPdoPool.php(102): Rcalicdan\\FiberAsync\\PDO\\AsyncPdoPool->createConnection()\n#1 C:\\wamp64\\package\\defer-test\\vendor\\rcalicdan\\fiber-async\\src\\Api\\AsyncPDO.php(87): Rcalicdan\\FiberAsync\\PDO\\AsyncPdoPool->get()\n#2 C:\\wamp64\\package\\defer-test\\vendor\\rcalicdan\\fiber-async\\src\\Async\\Handlers\\AsyncExecutionHandler.php(35): Rcalicdan\\FiberAsync\\Api\\AsyncPDO::{closure:Rcalicdan\\FiberAsync\\Api\\AsyncPDO::run():83}()\n#3 [internal function]: Rcalicdan\\FiberAsync\\Async\\Handlers\\AsyncExecutionHandler->{closure:{closure:{closure:Rcalicdan\\FiberAsync\\Async\\Handlers\\AsyncExecutionHandler::async():31}:32}:33}()\n#4 C:\\wamp64\\package\\defer-test\\vendor\\rcalicdan\\fiber-async\\src\\EventLoop\\IOHandlers\\Fiber\\FiberStartHandler.php(29): Fiber->start()\n#5 C:\\wamp64\\package\\defer-test\\vendor\\rcalicdan\\fiber-async\\src\\EventLoop\\Managers\\FiberManager.php(91): Rcalicdan\\FiberAsync\\EventLoop\\IOHandlers\\Fiber\\FiberStartHandler->startFiber(Object(Fiber))\n#6 C:\\wamp64\\package\\defer-test\\vendor\\rcalicdan\\fiber-async\\src\\EventLoop\\Managers\\FiberManager.php(68): Rcalicdan\\FiberAsync\\EventLoop\\Managers\\FiberManager->processNewFibers()\n#7 C:\\wamp64\\package\\defer-test\\vendor\\rcalicdan\\fiber-async\\src\\EventLoop\\Handlers\\WorkHandler.php(121): Rcalicdan\\FiberAsync\\EventLoop\\Managers\\FiberManager->processFibers()\n#8 C:\\wamp64\\package\\defer-test\\vendor\\rcalicdan\\fiber-async\\src\\EventLoop\\EventLoop.php(418): Rcalicdan\\FiberAsync\\EventLoop\\Handlers\\WorkHandler->processWork()\n#9 C:\\wamp64\\package\\defer-test\\vendor\\rcalicdan\\fiber-async\\src\\EventLoop\\EventLoop.php(294): Rcalicdan\\FiberAsync\\EventLoop\\EventLoop->tick()\n#10 C:\\wamp64\\package\\defer-test\\vendor\\rcalicdan\\fiber-async\\src\\Loop\\Handlers\\LoopExecutionHandler.php(53): Rcalicdan\\FiberAsync\\EventLoop\\EventLoop->run()\n#11 C:\\wamp64\\package\\defer-test\\vendor\\rcalicdan\\fiber-async\\src\\Loop\\LoopOperations.php(71): Rcalicdan\\FiberAsync\\Loop\\Handlers\\LoopExecutionHandler->run(Object(Closure), true)\n#12 C:\\wamp64\\package\\defer-test\\vendor\\rcalicdan\\fiber-async\\src\\Api\\Task.php(74): Rcalicdan\\FiberAsync\\Loop\\LoopOperations->run(Object(Closure), true)\n#13 closure://fn/7b3d1cd1256b14edce966e81e7642bb2(12): Rcalicdan\\FiberAsync\\Api\\Task::run(Object(Closure))\n#14 C:\\Users\\ACER\\AppData\\Local\\Temp\\defer_tasks\\defer_20250909_083821_68bfe77de05a80.51902907.php(127): {closure:{closure:closure://fn/7b3d1cd1256b14edce966e81e7642bb2:4}:10}()\n#15 {main}"
+}
