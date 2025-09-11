@@ -1,20 +1,21 @@
 <?php
 
 use Library\Defer\Defer;
+use Library\Defer\Parallel;
 
 require 'vendor/autoload.php';
 
 $start_time = microtime(true);
 
-$results = Defer::awaitTaskAll([
-    'task_A' => Defer::background(function () {
+$results = Parallel::all([
+    'task_A' => function () {
         sleep(2);
         return "Task A (slept for 2 seconds) finished successfully.";
-    }),
-    'task_B' => Defer::background(function () {
+    },
+    'task_B' => function () {
         sleep(3);
         return "Task B (slept for 3 seconds) finished successfully.";
-    })
+    }
 ]);
 
 $result_A = $results['task_A'];

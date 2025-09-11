@@ -1,43 +1,39 @@
 <?php
 
 use Library\Defer\Defer;
+use Library\Defer\Parallel;
 use Rcalicdan\FiberAsync\Api\Task;
 use Rcalicdan\FiberAsync\Api\Promise;
 
 require 'vendor/autoload.php';
-
+require 'helpers.php';
 $start_time = microtime(true);
 
 $results = Task::run(function () {
-    $deferPromise = async(function () {
-        $heavyTask1 = Defer::background(function () {
-            $start_time = microtime(true);
-            for($i=0; $i<=1000000000; $i++){
-               //count from 0 to a billion
-            }
-            $end_time = microtime(true);
-            return "Heavy Task 1 Complete. Time taken: " . ($end_time - $start_time) . " seconds";
-        });
+    $cpuTask1 = parallelize(Defer::lazy(function () {
+        $start_time = microtime(true);
+        for ($i = 0; $i <= 1000000000; $i++) {
+        }
+        $end_time = microtime(true);
 
-        $heavyTask2 = Defer::background(function () {
-            $start_time = microtime(true);
-            for($i=0; $i<=1000000000; $i++){
-               //count from 0 to a billion
-            }
-            $end_time = microtime(true);
-            return "Heavy Task 2 Complete. Time taken: " . ($end_time - $start_time) . " seconds";
-        });
+        return "Heavy Task 1 Complete. Time taken: " . ($end_time - $start_time) . " seconds";
+    }));
 
-        return Defer::awaitTaskAll([
-            "heavyTask1" => $heavyTask1,
-            "heavyTask2" => $heavyTask2,
-        ]);
-    });
+    $cpuTask2 = parallelize(Defer::lazy(function () {
+        $start_time = microtime(true);
+        for ($i = 0; $i <= 1000000000; $i++) {
+        }
+        $end_time = microtime(true);
+
+        return "Heavy Task 1 Complete. Time taken: " . ($end_time - $start_time) . " seconds";
+    }));
+
 
 
 
     $promiseAllResult = Promise::all([
-        'deferTasks' => $deferPromise, 
+        'cpuTask1' => $cpuTask1,
+        'cpuTask2' => $cpuTask2,
         'non-blocking task 1' => delay(2)->then(function () {
             return 'non-blocking task 1 result';
         }),
@@ -46,11 +42,14 @@ $results = Task::run(function () {
         }),
     ]);
 
-    $allResults = await($promiseAllResult);
-
-    return array_merge($allResults);
+    return await($promiseAllResult);
 });
 
+// parallelize(Defer::background(function () {
+//     sleep(10);
+//     file_put_contents('test.txt', 'test');
+// }));
+ 
 $end_time = microtime(true);
 $execution_time = $end_time - $start_time;
 echo "Execution time: " . $execution_time . " seconds\n\n";

@@ -1,38 +1,23 @@
 <?php
 
 use Library\Defer\Defer;
+use Library\Defer\Parallel;
 
 require 'vendor/autoload.php';
 
+echo "=== Parallel vs Sequential Test ===\n\n";
+
 $start_time = microtime(true);
-
-function heavyTask($name, $sleepTime)
-{
-    sleep($sleepTime);
-    return "Heavy Task $name Complete";
-}
-
-
-$results = Defer::awaitTaskAll(taskIds: [
-    'task1' => Defer::lazy(function () {
+Parallel::all([
+    'task1' => function () {
         sleep(2);
         return 'task1 result';
-    }),
-    'task2' => Defer::lazy(function () {
+    },
+    'task2' => function () {
         sleep(2);
         return 'task2 result';
-    }),
-    'task3' => Defer::lazy(function () {
-        sleep(2);
-        return 'task3 result';
-    }),
-    'task4' => Defer::lazy(function () {
-        sleep(2);
-        return 'task4 result';
-    }),
-],maxConcurrentTasks:2);
-
+    },
+]);
 $end_time = microtime(true);
-$execution_time = $end_time - $start_time;
-echo "Execution time: " . $execution_time . " seconds\n\n";
-// print_r($results);
+$parallel_time = $end_time - $start_time;
+echo "Parallel time: " . round($parallel_time, 2) . " seconds\n";
