@@ -45,7 +45,7 @@ class ProcessDeferHandler
     {
         $this->registerShutdownHandlers();
         $this->serializationManager = new CallbackSerializationManager();
-        $this->backgroundExecutor = new BackgroundProcessExecutorHandler($this->serializationManager, true, 'test/log.txt');
+        $this->backgroundExecutor = new BackgroundProcessExecutorHandler($this->serializationManager);
     }
 
     /**

@@ -84,7 +84,7 @@ class TaskAwaiter
                 throw new \RuntimeException("Tasks timed out after {$timeoutSeconds} seconds. Pending: {$pendingList}");
             }
 
-            usleep(250000); // Wait 250ms before next check
+            usleep(10000); // Wait 10ms before next check
 
         } while (true);
     }
@@ -164,7 +164,7 @@ class TaskAwaiter
                 return $results;
             }
 
-            usleep(250000); // Wait 250ms before next check
+            usleep(10000); // Wait 10ms before next check
 
         } while (true);
     }

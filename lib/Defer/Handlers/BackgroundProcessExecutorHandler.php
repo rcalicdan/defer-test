@@ -2,6 +2,7 @@
 
 namespace Library\Defer\Handlers;
 
+use Library\Defer\Config\ConfigLoader;
 use Library\Defer\Serialization\CallbackSerializationManager;
 use Library\Defer\Serialization\SerializationException;
 
@@ -13,10 +14,11 @@ use Library\Defer\Serialization\SerializationException;
  */
 class BackgroundProcessExecutorHandler
 {
+    private ConfigLoader $config;
     private CallbackSerializationManager $serializationManager;
     private string $tempDir;
     private string $logDir;
-    private string $logFile;
+    private ?string $logFile;
     private bool $enableDetailedLogging;
     private array $taskRegistry = [];
 
@@ -24,16 +26,30 @@ class BackgroundProcessExecutorHandler
 
     public function __construct(
         ?CallbackSerializationManager $serializationManager = null,
-        bool $enableDetailedLogging = true,
+        ?bool $enableDetailedLogging = null,
         ?string $customLogDir = null
     ) {
+        $this->config = ConfigLoader::getInstance();
         $this->serializationManager = $serializationManager ?: new CallbackSerializationManager();
-        $this->tempDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'defer_tasks';
-        $this->logDir = $customLogDir ?: (sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'defer_logs');
-        $this->logFile = $this->logDir . DIRECTORY_SEPARATOR . 'background_tasks.log';
 
-        $this->enableDetailedLogging = $enableDetailedLogging;
-        $this->frameworkInfo = $this->detectFramework();
+        $this->enableDetailedLogging = $enableDetailedLogging ?? $this->config->get('logging.enabled', true);
+        if ($this->enableDetailedLogging) {
+            $logDir = $customLogDir ?? $this->config->get('logging.directory');
+            $this->logDir = $logDir ?: (sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'defer_logs');
+            $this->logFile = $this->logDir . DIRECTORY_SEPARATOR . 'background_tasks.log';
+        } else {
+            $this->logDir = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'defer_status';
+            $this->logFile = null;
+        }
+
+        $tempDir = $this->config->get('temp_directory');
+        $this->tempDir = $tempDir ?: (sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'defer_tasks');
+
+        if ($this->config->get('bootstrap_framework', true)) {
+            $this->frameworkInfo = $this->detectFramework();
+        } else {
+            $this->frameworkInfo = ['name' => 'none', 'bootstrap_file' => null, 'init_code' => ''];
+        }
 
         $this->ensureDirectories();
         $this->initializeLogging();
@@ -59,12 +75,23 @@ class BackgroundProcessExecutorHandler
         $taskId = $this->generateTaskId();
         $taskFile = $this->tempDir . DIRECTORY_SEPARATOR . $taskId . '.php';
         $statusFile = $this->logDir . DIRECTORY_SEPARATOR . $taskId . '.status';
+        $memoryLimit = $this->config->get('process.memory_limit', '512M');
+        $timeout = (int) $this->config->get('process.timeout', 0);
 
         // Register task in registry
         $this->registerTask($taskId, $callback, $context, $statusFile);
 
         try {
-            $this->createBackgroundTaskScript($taskFile, $callback, $context, $taskId, $statusFile);
+            $this->createBackgroundTaskScript(
+                $taskFile,
+                $callback,
+                $context,
+                $taskId,
+                $statusFile,
+                $memoryLimit,
+                $timeout
+            );
+
             $this->spawnBackgroundProcess($taskFile);
 
             $this->logTaskEvent($taskId, 'SPAWNED', 'Background process spawned successfully');
@@ -618,7 +645,9 @@ class BackgroundProcessExecutorHandler
         callable $callback,
         array $context,
         string $taskId,
-        string $statusFile
+        string $statusFile,
+        string $memoryLimit,
+        int $timeout
     ): void {
         try {
             $serializedCallback = $this->serializationManager->serializeCallback($callback);
@@ -628,7 +657,15 @@ class BackgroundProcessExecutorHandler
         }
 
         $autoloadPath = $this->findAutoloadPath();
-        $script = $this->generateBackgroundScript($taskId, $serializedCallback, $serializedContext, $autoloadPath, $statusFile);
+        $script = $this->generateBackgroundScript(
+            $taskId,
+            $serializedCallback,
+            $serializedContext,
+            $autoloadPath,
+            $statusFile,
+            $memoryLimit,
+            $timeout
+        );
 
         if (file_put_contents($taskFile, $script) === false) {
             throw new \RuntimeException("Failed to create background task file: {$taskFile}");
@@ -653,7 +690,8 @@ class BackgroundProcessExecutorHandler
         string $serializedContext,
         string $autoloadPath,
         string $statusFile,
-        ?string $laravelBootstrapFile = null
+        string $memoryLimit,
+        int $timeout
     ): string {
         $generatedAt = date('Y-m-d H:i:s');
         $frameworkName = $this->frameworkInfo['name'] ?? 'none';
@@ -675,9 +713,9 @@ class BackgroundProcessExecutorHandler
 declare(strict_types=1);
 
 // Set execution environment
-set_time_limit(0);
+set_time_limit({$timeout});
 error_reporting(E_ALL);
-ini_set('memory_limit', '512M');
+ini_set('memory_limit', '{$memoryLimit}');
 ini_set('display_errors', '0');
 ini_set('log_errors', '1');
 
@@ -1036,8 +1074,6 @@ PHP;
                 throw new \RuntimeException("Failed to spawn Unix background process for task: {$taskId}, return code: {$returnCode}");
             }
         }
-
-        error_log("🚀 Background process spawned for task: {$taskId}");
     }
 
     /**
@@ -1094,7 +1130,7 @@ PHP;
      */
     private function logTaskEvent(string $taskId, string $level, string $message): void
     {
-        if (!$this->enableDetailedLogging) {
+        if (!$this->enableDetailedLogging || $this->logFile === null) {
             return;
         }
 
@@ -1114,7 +1150,7 @@ PHP;
      */
     private function logEvent(string $level, string $message): void
     {
-        if (!$this->enableDetailedLogging) {
+        if (!$this->enableDetailedLogging || $this->logFile === null) {
             return;
         }
 
