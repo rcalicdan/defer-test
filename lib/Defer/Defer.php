@@ -79,13 +79,62 @@ class Defer
     }
 
     /**
-     * Get the status of a background task
+     * Create a lazy background task that won't execute until needed
      * 
-     * @param string $taskId Task ID returned from terminate() or background()
-     * @return array Task status information
+     * @param callable $callback The callback to execute in background
+     * @param array $context Additional context data
+     * @return string Lazy task ID that can be used with existing methods
      */
+    public static function lazy(callable $callback, array $context = []): string
+    {
+        return LazyTask::create($callback, $context);
+    }
+
+    /**
+     * Get lazy task context without executing
+     */
+    public static function getLazyTaskContext(string $lazyTaskId): ?array
+    {
+        $task = LazyTask::get($lazyTaskId);
+        return $task ? $task->getContext() : null;
+    }
+
+    /**
+     * Update lazy task context before execution
+     */
+    public static function setLazyTaskContext(string $lazyTaskId, array $context): bool
+    {
+        $task = LazyTask::get($lazyTaskId);
+        if ($task) {
+            $task->setContext($context);
+            return true;
+        }
+        return false;
+    }
+
     public static function getTaskStatus(string $taskId): array
     {
+        if (LazyTask::isLazyId($taskId)) {
+            $task = LazyTask::get($taskId);
+            if (!$task) {
+                return [
+                    'task_id' => $taskId,
+                    'status' => 'NOT_FOUND',
+                    'message' => 'Lazy task not found'
+                ];
+            }
+
+            if (!$task->isExecuted()) {
+                return [
+                    'task_id' => $taskId,
+                    'status' => 'LAZY_PENDING',
+                    'message' => 'Lazy task not yet executed'
+                ];
+            }
+
+            return self::getTaskStatus($task->getRealTaskId());
+        }
+
         if (self::$globalHandler === null) {
             return [
                 'task_id' => $taskId,
@@ -220,6 +269,16 @@ class Defer
      */
     public static function awaitTask(string $taskId, int $timeoutSeconds = 60): mixed
     {
+        if (LazyTask::isLazyId($taskId)) {
+            $task = LazyTask::get($taskId);
+            if (!$task) {
+                throw new \RuntimeException("Lazy task not found: {$taskId}");
+            }
+
+            $realTaskId = $task->execute();
+            return self::awaitTask($realTaskId, $timeoutSeconds);
+        }
+
         $finalStatus = self::monitorTask($taskId, $timeoutSeconds);
 
         if ($finalStatus['status'] === 'COMPLETED') {

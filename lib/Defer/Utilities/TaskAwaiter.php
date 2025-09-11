@@ -4,21 +4,10 @@ namespace Library\Defer\Utilities;
 
 use Library\Defer\Defer;
 
-/**
- * Utility class for awaiting multiple tasks with optional process pooling
- */
 class TaskAwaiter
 {
     /**
      * Wait for multiple tasks to complete and return their results
-     * Fails fast on first error (like Promise.all())
-     * 
-     * @param array $taskIds Array of task IDs or callable tasks to wait for (keys are preserved in result)
-     * @param int $timeoutSeconds Maximum time to wait for all tasks
-     * @param int|null $maxConcurrentTasks Maximum concurrent processes (null = no limit)
-     * @param int $pollIntervalMs Polling interval in milliseconds for process pool
-     * @return array Task results with preserved keys, or null for failed tasks
-     * @throws \RuntimeException If any task fails or times out
      */
     public static function awaitAll(
         array $taskIds, 
@@ -30,25 +19,35 @@ class TaskAwaiter
             return [];
         }
 
-        // Check if we have callables (need to execute) or task IDs (already running)
-        $needsExecution = false;
+        // Check what types of tasks we have
+        $hasLazyTasks = false;
+        $hasCallables = false;
+        
         foreach ($taskIds as $item) {
-            if (is_callable($item) || (is_array($item) && isset($item['callback']))) {
-                $needsExecution = true;
-                break;
+            if (is_string($item) && LazyTask::isLazyId($item)) {
+                $hasLazyTasks = true;
+            } elseif (is_callable($item) || (is_array($item) && isset($item['callback']))) {
+                $hasCallables = true;
             }
         }
 
-        // If we have callables and a process pool limit, use the pool
-        if ($needsExecution && $maxConcurrentTasks !== null) {
+        // If we have lazy tasks or callables and a process pool limit, use the pool
+        if (($hasLazyTasks || $hasCallables) && $maxConcurrentTasks !== null) {
             return self::awaitAllWithPool($taskIds, $timeoutSeconds, $maxConcurrentTasks, $pollIntervalMs);
         }
 
-        // If we have callables but no pool limit, execute them all immediately
-        if ($needsExecution) {
+        // If we have lazy tasks or callables but no pool limit, execute them all immediately
+        if ($hasLazyTasks || $hasCallables) {
             $actualTaskIds = [];
             foreach ($taskIds as $key => $item) {
-                if (is_callable($item)) {
+                if (is_string($item) && LazyTask::isLazyId($item)) {
+                    $lazyTask = LazyTask::get($item);
+                    if ($lazyTask) {
+                        $actualTaskIds[$key] = $lazyTask->execute();
+                    } else {
+                        throw new \RuntimeException("Lazy task not found: {$item}");
+                    }
+                } elseif (is_callable($item)) {
                     $actualTaskIds[$key] = Defer::background($item);
                 } elseif (is_array($item) && isset($item['callback'])) {
                     $actualTaskIds[$key] = Defer::background($item['callback'], $item['context'] ?? []);
@@ -64,60 +63,7 @@ class TaskAwaiter
     }
 
     /**
-     * Wait for multiple tasks to complete and return all results (settled version)
-     * Similar to JavaScript's Promise.allSettled()
-     * 
-     * @param array $taskIds Array of task IDs or callable tasks to wait for (keys are preserved in result)
-     * @param int $timeoutSeconds Maximum time to wait for all tasks
-     * @param int|null $maxConcurrentTasks Maximum concurrent processes (null = no limit)
-     * @param int $pollIntervalMs Polling interval in milliseconds for process pool
-     * @return array Task results with preserved keys. Each result has 'status' and either 'value' or 'reason'
-     */
-    public static function awaitAllSettled(
-        array $taskIds, 
-        int $timeoutSeconds = 60,
-        ?int $maxConcurrentTasks = null,
-        int $pollIntervalMs = 100
-    ): array {
-        if (empty($taskIds)) {
-            return [];
-        }
-
-        // Check if we have callables (need to execute) or task IDs (already running)
-        $needsExecution = false;
-        foreach ($taskIds as $item) {
-            if (is_callable($item) || (is_array($item) && isset($item['callback']))) {
-                $needsExecution = true;
-                break;
-            }
-        }
-
-        // If we have callables and a process pool limit, use the pool
-        if ($needsExecution && $maxConcurrentTasks !== null) {
-            return self::awaitAllSettledWithPool($taskIds, $timeoutSeconds, $maxConcurrentTasks, $pollIntervalMs);
-        }
-
-        // If we have callables but no pool limit, execute them all immediately
-        if ($needsExecution) {
-            $actualTaskIds = [];
-            foreach ($taskIds as $key => $item) {
-                if (is_callable($item)) {
-                    $actualTaskIds[$key] = Defer::background($item);
-                } elseif (is_array($item) && isset($item['callback'])) {
-                    $actualTaskIds[$key] = Defer::background($item['callback'], $item['context'] ?? []);
-                } else {
-                    $actualTaskIds[$key] = $item; // Assume it's already a task ID
-                }
-            }
-            $taskIds = $actualTaskIds;
-        }
-
-        // Original implementation for task IDs
-        return self::awaitTaskIdsSettled($taskIds, $timeoutSeconds);
-    }
-
-    /**
-     * Await tasks using process pool (fail-fast version)
+     * Await tasks using process pool (handles lazy tasks properly)
      */
     private static function awaitAllWithPool(
         array $tasks, 
@@ -127,68 +73,52 @@ class TaskAwaiter
     ): array {
         $pool = new ProcessPool($maxConcurrentTasks, $pollIntervalMs);
         
-        // Convert callables to proper format
+        // Convert all items to pool-compatible format
         $poolTasks = [];
         foreach ($tasks as $key => $item) {
-            if (is_callable($item)) {
+            if (is_string($item) && LazyTask::isLazyId($item)) {
+                $lazyTask = LazyTask::get($item);
+                if ($lazyTask) {
+                    $poolTasks[$key] = [
+                        'callback' => function() use ($lazyTask) {
+                            // Get the original callback from the lazy task
+                            $reflection = new \ReflectionClass($lazyTask);
+                            $callbackProp = $reflection->getProperty('callback');
+                            $callbackProp->setAccessible(true);
+                            $callback = $callbackProp->getValue($lazyTask);
+                            
+                            return call_user_func($callback);
+                        },
+                        'context' => $lazyTask->getContext()
+                    ];
+                } else {
+                    throw new \RuntimeException("Lazy task not found: {$item}");
+                }
+            } elseif (is_callable($item)) {
                 $poolTasks[$key] = ['callback' => $item, 'context' => []];
             } elseif (is_array($item) && isset($item['callback'])) {
                 $poolTasks[$key] = $item;
             } else {
-                // Already a task ID, handle separately
-                $poolTasks[$key] = ['task_id' => $item];
+                // Already a task ID, handle separately - but this shouldn't happen in pool mode
+                throw new \RuntimeException("Cannot mix lazy/callable tasks with existing task IDs in pool mode");
             }
         }
 
-        // Execute tasks through pool
+        // Execute tasks through pool (this respects the concurrent limit)
         $taskIds = $pool->executeTasks($poolTasks);
 
-        // Wait for pool completion (ensures all tasks are at least started)
-        $poolTimeout = min($timeoutSeconds, 60); // Don't wait too long for pool startup
-        $pool->waitForCompletion($poolTimeout);
+        // Wait for pool completion
+        $poolTimeout = min($timeoutSeconds, 60);
+        if (!$pool->waitForCompletion($poolTimeout)) {
+            throw new \RuntimeException("Pool execution timed out during startup phase");
+        }
 
         // Now await all results
         return self::awaitTaskIds($taskIds, $timeoutSeconds);
     }
 
-    /**
-     * Await tasks using process pool (settled version)
-     */
-    private static function awaitAllSettledWithPool(
-        array $tasks, 
-        int $timeoutSeconds, 
-        int $maxConcurrentTasks, 
-        int $pollIntervalMs
-    ): array {
-        $pool = new ProcessPool($maxConcurrentTasks, $pollIntervalMs);
-        
-        // Convert callables to proper format
-        $poolTasks = [];
-        foreach ($tasks as $key => $item) {
-            if (is_callable($item)) {
-                $poolTasks[$key] = ['callback' => $item, 'context' => []];
-            } elseif (is_array($item) && isset($item['callback'])) {
-                $poolTasks[$key] = $item;
-            } else {
-                // Already a task ID, handle separately
-                $poolTasks[$key] = ['task_id' => $item];
-            }
-        }
-
-        // Execute tasks through pool
-        $taskIds = $pool->executeTasks($poolTasks);
-
-        // Wait for pool completion
-        $poolTimeout = min($timeoutSeconds, 60);
-        $pool->waitForCompletion($poolTimeout);
-
-        // Now await all results (settled)
-        return self::awaitTaskIdsSettled($taskIds, $timeoutSeconds);
-    }
-
-    /**
-     * Original implementation for awaiting task IDs (fail-fast)
-     */
+    // Remove the resolveLazyTasks method since we're handling it differently now
+    // Keep the original awaitTaskIds method unchanged
     private static function awaitTaskIds(array $taskIds, int $timeoutSeconds): array
     {
         $startTime = time();
@@ -256,16 +186,109 @@ class TaskAwaiter
         } while (true);
     }
 
-    /**
-     * Original implementation for awaiting task IDs (settled version)
-     */
+    // Keep awaitAllSettled implementation similar but with lazy task handling
+    public static function awaitAllSettled(
+        array $taskIds, 
+        int $timeoutSeconds = 60,
+        ?int $maxConcurrentTasks = null,
+        int $pollIntervalMs = 100
+    ): array {
+        if (empty($taskIds)) {
+            return [];
+        }
+
+        // Check what types of tasks we have
+        $hasLazyTasks = false;
+        $hasCallables = false;
+        
+        foreach ($taskIds as $item) {
+            if (is_string($item) && LazyTask::isLazyId($item)) {
+                $hasLazyTasks = true;
+            } elseif (is_callable($item) || (is_array($item) && isset($item['callback']))) {
+                $hasCallables = true;
+            }
+        }
+
+        // Use same logic as awaitAll but with settled behavior
+        if (($hasLazyTasks || $hasCallables) && $maxConcurrentTasks !== null) {
+            return self::awaitAllSettledWithPool($taskIds, $timeoutSeconds, $maxConcurrentTasks, $pollIntervalMs);
+        }
+
+        if ($hasLazyTasks || $hasCallables) {
+            $actualTaskIds = [];
+            foreach ($taskIds as $key => $item) {
+                if (is_string($item) && LazyTask::isLazyId($item)) {
+                    $lazyTask = LazyTask::get($item);
+                    if ($lazyTask) {
+                        $actualTaskIds[$key] = $lazyTask->execute();
+                    } else {
+                        throw new \RuntimeException("Lazy task not found: {$item}");
+                    }
+                } elseif (is_callable($item)) {
+                    $actualTaskIds[$key] = Defer::background($item);
+                } elseif (is_array($item) && isset($item['callback'])) {
+                    $actualTaskIds[$key] = Defer::background($item['callback'], $item['context'] ?? []);
+                } else {
+                    $actualTaskIds[$key] = $item;
+                }
+            }
+            $taskIds = $actualTaskIds;
+        }
+
+        return self::awaitTaskIdsSettled($taskIds, $timeoutSeconds);
+    }
+
+    private static function awaitAllSettledWithPool(
+        array $tasks, 
+        int $timeoutSeconds, 
+        int $maxConcurrentTasks, 
+        int $pollIntervalMs
+    ): array {
+        // Same implementation as awaitAllWithPool but use awaitTaskIdsSettled at the end
+        $pool = new ProcessPool($maxConcurrentTasks, $pollIntervalMs);
+        
+        $poolTasks = [];
+        foreach ($tasks as $key => $item) {
+            if (is_string($item) && LazyTask::isLazyId($item)) {
+                $lazyTask = LazyTask::get($item);
+                if ($lazyTask) {
+                    $poolTasks[$key] = [
+                        'callback' => function() use ($lazyTask) {
+                            $reflection = new \ReflectionClass($lazyTask);
+                            $callbackProp = $reflection->getProperty('callback');
+                            $callbackProp->setAccessible(true);
+                            $callback = $callbackProp->getValue($lazyTask);
+                            
+                            return call_user_func($callback);
+                        },
+                        'context' => $lazyTask->getContext()
+                    ];
+                } else {
+                    throw new \RuntimeException("Lazy task not found: {$item}");
+                }
+            } elseif (is_callable($item)) {
+                $poolTasks[$key] = ['callback' => $item, 'context' => []];
+            } elseif (is_array($item) && isset($item['callback'])) {
+                $poolTasks[$key] = $item;
+            } else {
+                throw new \RuntimeException("Cannot mix lazy/callable tasks with existing task IDs in pool mode");
+            }
+        }
+
+        $taskIds = $pool->executeTasks($poolTasks);
+        $poolTimeout = min($timeoutSeconds, 60);
+        $pool->waitForCompletion($poolTimeout);
+
+        return self::awaitTaskIdsSettled($taskIds, $timeoutSeconds);
+    }
+
     private static function awaitTaskIdsSettled(array $taskIds, int $timeoutSeconds): array
     {
+        // Keep your existing implementation
         $startTime = time();
         $results = [];
         $completedTasks = [];
 
-        // Initialize results array with preserved keys
         foreach ($taskIds as $key => $taskId) {
             $results[$key] = null;
         }
@@ -274,7 +297,6 @@ class TaskAwaiter
             $allCompleted = true;
             
             foreach ($taskIds as $key => $taskId) {
-                // Skip already processed tasks
                 if (isset($completedTasks[$key])) {
                     continue;
                 }
@@ -297,17 +319,14 @@ class TaskAwaiter
                     ];
                     $completedTasks[$key] = true;
                 } else {
-                    // Task is still pending or running
                     $allCompleted = false;
                 }
             }
 
-            // All tasks processed (completed or failed)
             if ($allCompleted) {
                 return $results;
             }
 
-            // Check timeout
             if ($timeoutSeconds > 0 && (time() - $startTime) >= $timeoutSeconds) {
                 foreach ($taskIds as $key => $taskId) {
                     if (!isset($completedTasks[$key])) {
@@ -321,7 +340,7 @@ class TaskAwaiter
                 return $results;
             }
 
-            usleep(10000); // Wait 10ms before next check
+            usleep(10000);
 
         } while (true);
     }

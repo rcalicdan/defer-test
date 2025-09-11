@@ -11,22 +11,28 @@ function heavyTask($name, $sleepTime)
     sleep($sleepTime);
     return "Heavy Task $name Complete";
 }
-$results = Defer::awaitTaskAll([
-    'task1' => function () {
+
+
+$results = Defer::awaitTaskAll(taskIds: [
+    'task1' => Defer::lazy(function () {
         sleep(2);
         return 'task1 result';
-    },
-    'task2' => function () {
+    }),
+    'task2' => Defer::lazy(function () {
         sleep(2);
         return 'task2 result';
-    },
-    'task3' => function () {
+    }),
+    'task3' => Defer::lazy(function () {
         sleep(2);
         return 'task3 result';
-    },
-], maxConcurrentTasks:2);
+    }),
+    'task4' => Defer::lazy(function () {
+        sleep(2);
+        return 'task4 result';
+    }),
+],maxConcurrentTasks:2);
 
 $end_time = microtime(true);
 $execution_time = $end_time - $start_time;
 echo "Execution time: " . $execution_time . " seconds\n\n";
-print_r($results);
+// print_r($results);

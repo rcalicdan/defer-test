@@ -12,6 +12,7 @@ class ProcessPool
     private int $maxConcurrentTasks;
     private array $activeTasks = [];
     private array $queuedTasks = [];
+    private array $allTaskIds = []; // Track all task IDs that should be returned
     private int $pollIntervalMs;
 
     public function __construct(int $maxConcurrentTasks = 5, int $pollIntervalMs = 100)
@@ -28,9 +29,8 @@ class ProcessPool
      */
     public function executeTasks(array $tasks): array
     {
-        $taskIds = [];
-
-        // Queue all tasks
+        $this->allTaskIds = []; 
+        
         foreach ($tasks as $key => $taskData) {
             $this->queuedTasks[] = [
                 'key' => $key,
@@ -39,29 +39,17 @@ class ProcessPool
             ];
         }
 
-        // Start initial batch
-        $this->processQueue();
-
-        // Get all task IDs
-        foreach ($this->activeTasks as $task) {
-            $taskIds[$task['key']] = $task['task_id'];
-        }
-
-        // Continue processing until all tasks are started
-        while (!empty($this->queuedTasks)) {
-            $this->checkCompletedTasks();
+        while (!empty($this->queuedTasks) || !empty($this->activeTasks)) {
             $this->processQueue();
-            usleep($this->pollIntervalMs * 1000);
-        }
-
-        // Collect remaining active task IDs
-        foreach ($this->activeTasks as $task) {
-            if (!isset($taskIds[$task['key']])) {
-                $taskIds[$task['key']] = $task['task_id'];
+            
+            $this->checkCompletedTasks();
+            
+            if (!empty($this->queuedTasks) || !empty($this->activeTasks)) {
+                usleep($this->pollIntervalMs * 1000);
             }
         }
 
-        return $taskIds;
+        return $this->allTaskIds;
     }
 
     /**
@@ -74,7 +62,7 @@ class ProcessPool
 
             if (in_array($status['status'], ['COMPLETED', 'ERROR', 'NOT_FOUND'])) {
                 unset($this->activeTasks[$index]);
-                $this->activeTasks = array_values($this->activeTasks); // Re-index
+                $this->activeTasks = array_values($this->activeTasks); 
             }
         }
     }
@@ -89,15 +77,18 @@ class ProcessPool
 
             try {
                 $taskId = Defer::background($task['callback'], $task['context']);
+                
+                $this->allTaskIds[$task['key']] = $taskId;
+                
                 $this->activeTasks[] = [
                     'key' => $task['key'],
                     'task_id' => $taskId,
                     'started_at' => time()
                 ];
             } catch (\Throwable $e) {
-                // If task fails to start, we could either skip it or throw
-                // For now, we'll skip and let the awaiter handle the missing task
-                error_log("Failed to start pooled task: " . $e->getMessage());
+                error_log("Failed to start pooled task {$task['key']}: " . $e->getMessage());
+                $fakeTaskId = 'failed_' . $task['key'] . '_' . time();
+                $this->allTaskIds[$task['key']] = $fakeTaskId;
             }
         }
     }
@@ -111,6 +102,7 @@ class ProcessPool
             'max_concurrent' => $this->maxConcurrentTasks,
             'active_tasks' => count($this->activeTasks),
             'queued_tasks' => count($this->queuedTasks),
+            'completed_task_ids' => count($this->allTaskIds),
             'poll_interval_ms' => $this->pollIntervalMs
         ];
     }
@@ -122,10 +114,12 @@ class ProcessPool
     {
         $startTime = time();
 
-        while (!empty($this->activeTasks)) {
+        while (!empty($this->queuedTasks) || !empty($this->activeTasks)) {
+            $this->processQueue();
             $this->checkCompletedTasks();
 
             if ($timeoutSeconds > 0 && (time() - $startTime) >= $timeoutSeconds) {
+                error_log("Pool completion timeout. Queued: " . count($this->queuedTasks) . ", Active: " . count($this->activeTasks));
                 return false;
             }
 
