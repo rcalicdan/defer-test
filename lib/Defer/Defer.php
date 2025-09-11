@@ -4,6 +4,7 @@ namespace Library\Defer;
 
 use Library\Defer\Handlers\ProcessDeferHandler;
 use Library\Defer\Utilities\DeferInstance;
+use Library\Defer\Utilities\LazyTask;
 use Library\Defer\Utilities\TaskAwaiter;
 
 /**
@@ -184,7 +185,7 @@ class Defer
 
         do {
             $status = self::getTaskStatus($taskId);
-            
+
             // Call progress callback if status changed
             if ($progressCallback && $status !== $lastStatus) {
                 $progressCallback($status);
@@ -240,26 +241,38 @@ class Defer
     /**
      * Wait for multiple tasks to complete and return their results
      * 
-     * @param array $taskIds Array of task IDs to wait for (keys are preserved in result)
+     * @param array $taskIds Array of task IDs or callables to wait for (keys are preserved in result)
      * @param int $timeoutSeconds Maximum time to wait for all tasks
+     * @param int|null $maxConcurrentTasks Maximum concurrent processes (null = no limit)
+     * @param int $pollIntervalMs Polling interval in milliseconds for process pool
      * @return array Task results with preserved keys, or null for failed tasks
      * @throws \RuntimeException If any task fails or times out
      */
-    public static function awaitTaskAll(array $taskIds, int $timeoutSeconds = 60): array
-    {
-        return TaskAwaiter::awaitAll($taskIds, $timeoutSeconds);
+    public static function awaitTaskAll(
+        array $taskIds,
+        int $timeoutSeconds = 60,
+        ?int $maxConcurrentTasks = null,
+        int $pollIntervalMs = 100
+    ): array {
+        return TaskAwaiter::awaitAll($taskIds, $timeoutSeconds, $maxConcurrentTasks, $pollIntervalMs);
     }
 
     /**
      * Wait for multiple tasks to complete and return all results (settled version)
      * 
-     * @param array $taskIds Array of task IDs to wait for (keys are preserved in result)
+     * @param array $taskIds Array of task IDs or callables to wait for (keys are preserved in result)
      * @param int $timeoutSeconds Maximum time to wait for all tasks
+     * @param int|null $maxConcurrentTasks Maximum concurrent processes (null = no limit)
+     * @param int $pollIntervalMs Polling interval in milliseconds for process pool
      * @return array Task results with preserved keys. Each result has 'status' and either 'value' or 'reason'
      */
-    public static function awaitTaskAllSettled(array $taskIds, int $timeoutSeconds = 60): array
-    {
-        return TaskAwaiter::awaitAllSettled($taskIds, $timeoutSeconds);
+    public static function awaitTaskAllSettled(
+        array $taskIds,
+        int $timeoutSeconds = 60,
+        ?int $maxConcurrentTasks = null,
+        int $pollIntervalMs = 100
+    ): array {
+        return TaskAwaiter::awaitAllSettled($taskIds, $timeoutSeconds, $maxConcurrentTasks, $pollIntervalMs);
     }
 
     /**
@@ -271,7 +284,7 @@ class Defer
     {
         $summary = self::getTasksSummary();
         $recentLogs = self::getRecentLogs(20);
-        $activeTasks = array_filter(self::getAllTasksStatus(), function($task) {
+        $activeTasks = array_filter(self::getAllTasksStatus(), function ($task) {
             return in_array($task['status'], ['PENDING', 'RUNNING']);
         });
 
@@ -313,7 +326,7 @@ class Defer
 
         $stats = self::$globalHandler->getStats();
         $tasksSummary = self::getTasksSummary();
-        
+
         $stats['background_tasks'] = [
             'total' => $tasksSummary['total_tasks'],
             'active' => $tasksSummary['running'] + $tasksSummary['pending'],

@@ -314,6 +314,11 @@ class ProcessDeferHandler
         }
     }
 
+    public function getLogDirectory(): string
+    {
+        return $this->backgroundExecutor->getLogDirectory();
+    }
+
     /**
      * Add callback to global stack
      *
