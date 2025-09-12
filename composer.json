@@ -2,7 +2,10 @@
     "autoload": {
         "psr-4": {
             "Library\\": "lib/"
-        }
+        },
+        "files": [
+            "lib/Defer/functions.php"
+        ]
     },
     "require": {
         "opis/closure": "^4.3",

@@ -4,6 +4,7 @@ namespace Library\Defer;
 
 use Library\Defer\Handlers\ProcessDeferHandler;
 use Library\Defer\Utilities\DeferInstance;
+use Library\Defer\Utilities\DeferredBatch;
 use Library\Defer\Utilities\LazyTask;
 use Library\Defer\Utilities\TaskAwaiter;
 
@@ -254,7 +255,7 @@ class Defer
                 ]);
             }
 
-            usleep(250000); // Wait 250ms before next check
+            usleep(10000); // Wait 10ms before next check
 
         } while (true);
     }

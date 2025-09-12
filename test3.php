@@ -1,11 +1,26 @@
 <?php
 
-use Library\Defer\Defer;
-
 require 'vendor/autoload.php';
 
-Defer::global(function () {
-    echo "Hello, World!\n";
+use Library\Defer\Parallel;
+use Rcalicdan\FiberAsync\Api\Task;
+
+$start_time = microtime(true);
+
+Task::run(function () {
+    await(all([
+        parallelize(function () {
+            all([
+                delay(4),
+                delay(4),
+                delay(4),
+                delay(4),
+                parallelize(fn() => sleep(4))
+            ])->await();
+        })
+    ]));
 });
 
-throw new ErrorException('Test Error');
+$parallel_time = microtime(true) - $start_time;
+echo "Parallel time: " . round($parallel_time, 2) . " seconds\n";
+// print_r($results);

@@ -2,11 +2,7 @@
 
 use Library\Defer\Defer;
 use Library\Defer\Parallel;
-use Rcalicdan\FiberAsync\EventLoop\EventLoop;
 use Rcalicdan\FiberAsync\Promise\Interfaces\PromiseInterface;
-use Rcalicdan\FiberAsync\Promise\Promise;
-
-require 'vendor/autoload.php';
 
 function parallel(array $tasks): PromiseInterface
 {
