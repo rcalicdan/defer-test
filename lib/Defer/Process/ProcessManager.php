@@ -162,6 +162,9 @@ class ProcessManager
     /**
      * Generate the background script template
      */
+    /**
+     * Generate the background script template with output capture
+     */
     private function generateBackgroundScript(
         string $taskId,
         string $serializedCallback,
@@ -181,7 +184,7 @@ class ProcessManager
         return <<<PHP
 <?php
 /**
- * Auto-generated background task script with comprehensive monitoring
+ * Auto-generated background task script with comprehensive monitoring and output capture
  * Task ID: {$taskId}
  * Generated at: {$generatedAt}
  */
@@ -204,8 +207,11 @@ ini_set('log_errors', '1');
 \$startTime = microtime(true);
 \$pid = getmypid();
 
+// Initialize output buffer for capturing prints/echos
+\$capturedOutput = '';
+
 function updateTaskStatus(\$status, \$message = '', \$extra = []) {
-    global \$taskId, \$statusFile, \$startTime, \$pid;
+    global \$taskId, \$statusFile, \$startTime, \$pid, \$capturedOutput;
     
     \$statusData = array_merge([
         'task_id' => \$taskId,
@@ -222,10 +228,17 @@ function updateTaskStatus(\$status, \$message = '', \$extra = []) {
         'os_family' => PHP_OS_FAMILY
     ], \$extra);
     
+    // Include captured output if any
+    if (!empty(\$capturedOutput)) {
+        \$statusData['output'] = \$capturedOutput;
+    }
+    
     file_put_contents(\$statusFile, json_encode(\$statusData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
 }
 
 function logError(\$e) {
+    global \$capturedOutput;
+    
     \$errorInfo = [
         'error_message' => \$e->getMessage(),
         'error_file' => \$e->getFile(),
@@ -234,8 +247,20 @@ function logError(\$e) {
         'stack_trace' => \$e->getTraceAsString()
     ];
     
+    // Include any captured output with the error
+    if (!empty(\$capturedOutput)) {
+        \$errorInfo['output'] = \$capturedOutput;
+    }
+    
     updateTaskStatus('ERROR', 'Task failed: ' . \$e->getMessage(), \$errorInfo);
     error_log("❌ Background task error: " . \$e->getMessage());
+}
+
+// Custom output handler to capture all output
+function captureOutput(\$buffer) {
+    global \$capturedOutput;
+    \$capturedOutput .= \$buffer;
+    return \$buffer; // Return buffer to continue normal output buffering
 }
 
 try {
@@ -270,11 +295,27 @@ try {
         throw new RuntimeException('Deserialized callback is not callable');
     }
     
-    // Execute the callback
-    \$reflection = new ReflectionFunction(\$callback instanceof Closure ? \$callback : Closure::fromCallable(\$callback));
-    \$paramCount = \$reflection->getNumberOfParameters();
+    // Start output buffering with our custom handler to capture all output
+    ob_start('captureOutput');
     
-    \$result = \$paramCount > 0 && !empty(\$context) ? \$callback(\$context) : \$callback();
+    // Update status before callback execution
+    updateTaskStatus('RUNNING', 'Executing callback');
+    
+    try {
+        // Execute the callback
+        \$reflection = new ReflectionFunction(\$callback instanceof Closure ? \$callback : Closure::fromCallable(\$callback));
+        \$paramCount = \$reflection->getNumberOfParameters();
+        
+        \$result = \$paramCount > 0 && !empty(\$context) ? \$callback(\$context) : \$callback();
+        
+        // Flush and capture any remaining output
+        ob_end_flush();
+        
+    } catch (Throwable \$callbackError) {
+        // Make sure to capture any output even if callback fails
+        ob_end_flush();
+        throw \$callbackError;
+    }
     
     \$duration = microtime(true) - \$startTime;
     \$resultInfo = [
@@ -286,14 +327,48 @@ try {
     if (\$result !== null) {
         \$resultInfo['result'] = \$result;
         \$resultInfo['result_type'] = gettype(\$result);
+        
+        // If result is too large, truncate it for status file
+        if (is_string(\$result) && strlen(\$result) > 1000) {
+            \$resultInfo['result_truncated'] = true;
+            \$resultInfo['result'] = substr(\$result, 0, 1000) . '... (truncated)';
+            \$resultInfo['result_length'] = strlen(\$result);
+        } elseif (is_array(\$result) && count(\$result) > 50) {
+            \$resultInfo['result_truncated'] = true;
+            \$resultInfo['result'] = array_slice(\$result, 0, 50);
+            \$resultInfo['result_count'] = count(\$result);
+        }
+    }
+    
+    // Include captured output statistics
+    if (!empty(\$capturedOutput)) {
+        \$resultInfo['output_length'] = strlen(\$capturedOutput);
+        \$resultInfo['output_lines'] = substr_count(\$capturedOutput, "\n") + 1;
+        
+        // If output is too large, truncate it for status file
+        if (strlen(\$capturedOutput) > 2000) {
+            \$resultInfo['output_truncated'] = true;
+            \$resultInfo['full_output'] = \$capturedOutput; // Keep full output
+            // Don't truncate in global variable, let updateTaskStatus handle it
+        }
     }
     
     updateTaskStatus('COMPLETED', "Task completed successfully in " . number_format(\$duration, 3) . " seconds", \$resultInfo);
     
 } catch (Throwable \$e) {
+    // Ensure output buffer is cleaned up
+    if (ob_get_level()) {
+        ob_end_clean();
+    }
+    
     logError(\$e);
     exit(1);
 } finally {
+    // Clean up output buffer if still active
+    while (ob_get_level()) {
+        ob_end_clean();
+    }
+    
     // Clean up task file
     if (file_exists(__FILE__)) {
         @unlink(__FILE__);
@@ -313,7 +388,7 @@ PHP;
         $taskId = basename($taskFile, '.php');
 
         if (PHP_OS_FAMILY === 'Windows') {
-            $cmd = "start /B \"\" \"{$phpBinary}\" \"{$taskFile}\" 2>nul";
+            $cmd = "start /B \"\" \"{$phpBinary}\" \"{$taskFile}\" >nul 2>nul";
             $process = popen($cmd, 'r');
             if ($process === false) {
                 throw new \RuntimeException("Failed to spawn Windows background process for task: {$taskId}");

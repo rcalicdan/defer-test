@@ -58,8 +58,8 @@ class TaskAwaiter
             $taskIds = $actualTaskIds;
         }
 
-        // Original implementation for task IDs
-        return self::awaitTaskIds($taskIds, $timeoutSeconds);
+        // Original implementation for task IDs with automatic output display
+        return self::awaitTaskIdsWithOutput($taskIds, $timeoutSeconds);
     }
 
     /**
@@ -113,18 +113,20 @@ class TaskAwaiter
             throw new \RuntimeException("Pool execution timed out during startup phase");
         }
 
-        // Now await all results
-        return self::awaitTaskIds($taskIds, $timeoutSeconds);
+        // Now await all results with output display
+        return self::awaitTaskIdsWithOutput($taskIds, $timeoutSeconds);
     }
 
-    // Remove the resolveLazyTasks method since we're handling it differently now
-    // Keep the original awaitTaskIds method unchanged
-    private static function awaitTaskIds(array $taskIds, int $timeoutSeconds): array
+    /**
+     * Wait for task IDs with automatic output display
+     */
+    private static function awaitTaskIdsWithOutput(array $taskIds, int $timeoutSeconds): array
     {
         $startTime = time();
         $results = [];
         $completedTasks = [];
         $failedTasks = [];
+        $displayedOutput = []; // Track which tasks' output we've already displayed
 
         // Initialize results array with preserved keys
         foreach ($taskIds as $key => $taskId) {
@@ -142,9 +144,23 @@ class TaskAwaiter
 
                 $status = Defer::getTaskStatus($taskId);
                 
+                // Display output as soon as it's available (even for running tasks)
+                if (isset($status['output']) && !empty($status['output']) && !isset($displayedOutput[$taskId])) {
+                    echo $status['output'];
+                    $displayedOutput[$taskId] = true;
+                }
+                
                 if ($status['status'] === 'COMPLETED') {
                     $results[$key] = $status['result'] ?? null;
                     $completedTasks[$key] = true;
+                    
+                    // Display output one more time for completed tasks (in case it was updated)
+                    if (isset($status['output']) && !empty($status['output'])) {
+                        if (!isset($displayedOutput[$taskId])) {
+                            echo $status['output'];
+                            $displayedOutput[$taskId] = true;
+                        }
+                    }
                 } elseif ($status['status'] === 'ERROR' || $status['status'] === 'NOT_FOUND') {
                     $failedTasks[$key] = $status;
                     $allCompleted = false;
@@ -186,7 +202,9 @@ class TaskAwaiter
         } while (true);
     }
 
-    // Keep awaitAllSettled implementation similar but with lazy task handling
+    /**
+     * Wait for multiple tasks to complete and return all results (settled version)
+     */
     public static function awaitAllSettled(
         array $taskIds, 
         int $timeoutSeconds = 60,
@@ -235,7 +253,7 @@ class TaskAwaiter
             $taskIds = $actualTaskIds;
         }
 
-        return self::awaitTaskIdsSettled($taskIds, $timeoutSeconds);
+        return self::awaitTaskIdsSettledWithOutput($taskIds, $timeoutSeconds);
     }
 
     private static function awaitAllSettledWithPool(
@@ -244,7 +262,7 @@ class TaskAwaiter
         int $maxConcurrentTasks, 
         int $pollIntervalMs
     ): array {
-        // Same implementation as awaitAllWithPool but use awaitTaskIdsSettled at the end
+        // Same implementation as awaitAllWithPool but use awaitTaskIdsSettledWithOutput at the end
         $pool = new ProcessPool($maxConcurrentTasks, $pollIntervalMs);
         
         $poolTasks = [];
@@ -279,15 +297,15 @@ class TaskAwaiter
         $poolTimeout = min($timeoutSeconds, 60);
         $pool->waitForCompletion($poolTimeout);
 
-        return self::awaitTaskIdsSettled($taskIds, $timeoutSeconds);
+        return self::awaitTaskIdsSettledWithOutput($taskIds, $timeoutSeconds);
     }
 
-    private static function awaitTaskIdsSettled(array $taskIds, int $timeoutSeconds): array
+    private static function awaitTaskIdsSettledWithOutput(array $taskIds, int $timeoutSeconds): array
     {
-        // Keep your existing implementation
         $startTime = time();
         $results = [];
         $completedTasks = [];
+        $displayedOutput = []; // Track which tasks' output we've already displayed
 
         foreach ($taskIds as $key => $taskId) {
             $results[$key] = null;
@@ -303,6 +321,12 @@ class TaskAwaiter
 
                 $status = Defer::getTaskStatus($taskId);
                 
+                // Display output as soon as it's available (even for running tasks)
+                if (isset($status['output']) && !empty($status['output']) && !isset($displayedOutput[$taskId])) {
+                    echo $status['output'];
+                    $displayedOutput[$taskId] = true;
+                }
+                
                 if ($status['status'] === 'COMPLETED') {
                     $results[$key] = [
                         'status' => 'fulfilled',
@@ -310,6 +334,14 @@ class TaskAwaiter
                         'task_id' => $taskId
                     ];
                     $completedTasks[$key] = true;
+                    
+                    // Display output one more time for completed tasks
+                    if (isset($status['output']) && !empty($status['output'])) {
+                        if (!isset($displayedOutput[$taskId])) {
+                            echo $status['output'];
+                            $displayedOutput[$taskId] = true;
+                        }
+                    }
                 } elseif ($status['status'] === 'ERROR' || $status['status'] === 'NOT_FOUND') {
                     $errorMsg = $status['error_message'] ?? $status['message'];
                     $results[$key] = [
@@ -318,6 +350,14 @@ class TaskAwaiter
                         'task_id' => $taskId
                     ];
                     $completedTasks[$key] = true;
+                    
+                    // Display output even for failed tasks
+                    if (isset($status['output']) && !empty($status['output'])) {
+                        if (!isset($displayedOutput[$taskId])) {
+                            echo $status['output'];
+                            $displayedOutput[$taskId] = true;
+                        }
+                    }
                 } else {
                     $allCompleted = false;
                 }

@@ -220,6 +220,14 @@ class Defer
      * @param callable|null $progressCallback Called with status updates
      * @return array Final task status
      */
+    /**
+     * Monitor a task until completion or timeout
+     * 
+     * @param string $taskId Task ID to monitor
+     * @param int $timeoutSeconds Maximum time to wait (0 = no timeout)
+     * @param callable|null $progressCallback Called with status updates
+     * @return array Final task status
+     */
     public static function monitorTask(string $taskId, int $timeoutSeconds = 30, ?callable $progressCallback = null): array
     {
         if (self::$globalHandler === null) {
@@ -232,9 +240,16 @@ class Defer
 
         $startTime = time();
         $lastStatus = null;
+        $displayedOutput = false; // Track if we've displayed output for this task
 
         do {
             $status = self::getTaskStatus($taskId);
+
+            // Automatically display output as soon as it's available
+            if (isset($status['output']) && !empty($status['output']) && !$displayedOutput) {
+                echo $status['output'];
+                $displayedOutput = true;
+            }
 
             // Call progress callback if status changed
             if ($progressCallback && $status !== $lastStatus) {
@@ -244,6 +259,10 @@ class Defer
 
             // Check if task is finished
             if (in_array($status['status'], ['COMPLETED', 'ERROR', 'NOT_FOUND'])) {
+                // Final output display for completed/failed tasks
+                if (isset($status['output']) && !empty($status['output']) && !$displayedOutput) {
+                    echo $status['output'];
+                }
                 return $status;
             }
 
