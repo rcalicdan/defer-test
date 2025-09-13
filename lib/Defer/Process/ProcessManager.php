@@ -56,7 +56,6 @@ class ProcessManager
             );
 
             $this->spawnBackgroundProcess($taskFile);
-            
         } catch (\Throwable $e) {
             if (file_exists($taskFile)) {
                 unlink($taskFile);
@@ -112,7 +111,6 @@ class ProcessManager
             $results['stats']['php_binary'] = $this->systemUtils->getPhpBinary();
             $results['stats']['temp_dir'] = $this->systemUtils->getTempDirectory();
             $results['stats']['log_dir'] = $this->logger->getLogDirectory();
-            
         } catch (\Throwable $e) {
             $results['errors'][] = $e->getMessage();
             if ($verbose) echo "❌ Test failed: " . $e->getMessage() . "\n";
@@ -189,6 +187,10 @@ class ProcessManager
  */
 
 declare(strict_types=1);
+
+// FORK BOMB PROTECTION: Mark this as a background process
+putenv('DEFER_BACKGROUND_PROCESS=1');
+\$_ENV['DEFER_BACKGROUND_PROCESS'] = '1';
 
 // Set execution environment
 set_time_limit({$timeout});
