@@ -54,11 +54,18 @@ class BackgroundProcessExecutorHandler
      */
     public function execute(callable $callback, array $context = []): string
     {
+        if ($this->isRunningInBackground()) {
+            $this->logger->logEvent('WARNING', 'Blocked nested background process spawn attempt');
+            throw new \RuntimeException(
+                'Cannot spawn background process from within another background process. ' .
+                    'This prevents fork bombs and resource exhaustion.'
+            );
+        }
+
         $this->validateSerialization($callback, $context);
 
         $taskId = $this->systemUtils->generateTaskId();
 
-        // Register task in registry
         $this->taskRegistry->registerTask($taskId, $callback, $context);
         $this->statusManager->createInitialStatus($taskId, $callback, $context);
 
@@ -82,6 +89,15 @@ class BackgroundProcessExecutorHandler
             ]);
             throw $e;
         }
+    }
+
+    /**
+     * Check if currently running in a background process
+     */
+    private function isRunningInBackground(): bool
+    {
+        return getenv('DEFER_BACKGROUND_PROCESS') === '1' ||
+            (isset($_ENV['DEFER_BACKGROUND_PROCESS']) && $_ENV['DEFER_BACKGROUND_PROCESS'] === '1');
     }
 
     /**

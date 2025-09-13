@@ -1,32 +1,28 @@
 <?php
 
 use Library\Defer\Defer;
+use Rcalicdan\FiberAsync\Api\Task;
+use Rcalicdan\FiberAsync\Promise\Promise;
 
 require 'vendor/autoload.php';
-
-$task1 = Defer::background(function () {
-    $startTime = microtime(true);
-    sleep(5);
-    $totalTime = microtime(true) - $startTime;
-    file_put_contents('txts.txt', "Hello World from terminate callback txts.txt - " . date('Y-m-d H:i:s') . " - " . number_format($totalTime, 3) . " seconds");
-    return "txts.txt";
-});
-
-$task2 = Defer::background(function () {
-    $startTime = microtime(true);
-    sleep(5);
-    $totalTime = microtime(true) - $startTime;
-    file_put_contents('txts1.txt', "Hello World from terminate callback txts1.txt - " . date('Y-m-d H:i:s') . " - " . number_format($totalTime, 3) . " seconds");
-    return "txts1.txt";
-});
-
-
 $startTime = microtime(true);
-$content = Defer::awaitTask($task1);
-$content1 = Defer::awaitTask($task2);
+$result = Task::run(function () {
+    return await(Promise::all([
+        async(function () {
+            await(delay(1));
+            return "Task 1 complete";
+        }),
+        async(function () {
+            sleep(1);
+            return "Task 2 complete";
+        }),
+                async(function () {
+            sleep(1);
+            return "Task 2 complete";
+        }),
+    ]));
+});
+
 $totalTime = microtime(true) - $startTime;
 echo "Total time: " . number_format($totalTime, 3) . " seconds\n";
-
-
-echo $content . PHP_EOL;
-echo $content1 . PHP_EOL;
+print_r($result);
