@@ -152,11 +152,13 @@ class ProcessManager
             $frameworkInfo
         );
 
-        if (file_put_contents($taskFile, $script) === false) {
+        if (file_put_contents($taskFile, $script, LOCK_EX) === false) {
             throw new \RuntimeException("Failed to create background task file: {$taskFile}");
         }
 
-        chmod($taskFile, 0755);
+        if ((fileperms($taskFile) & 0777) !== 0755) {
+            chmod($taskFile, 0755);
+        }
     }
 
     /**
