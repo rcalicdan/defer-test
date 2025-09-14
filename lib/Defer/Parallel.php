@@ -21,9 +21,9 @@ class Parallel
      */
     public static function all(
         array $tasks,
-        int $timeoutSeconds = 60,
         ?int $maxConcurrency = null,
-        int $pollIntervalMs = 100
+        int $timeoutSeconds = 60,
+        int $pollIntervalMs = 10
     ): array {
         return TaskAwaiter::awaitAll($tasks, $timeoutSeconds, $maxConcurrency, $pollIntervalMs);
     }

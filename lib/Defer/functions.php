@@ -2,6 +2,7 @@
 
 use Library\Defer\Defer;
 use Library\Defer\Parallel;
+use Library\Defer\Process;
 use Rcalicdan\FiberAsync\Promise\Interfaces\PromiseInterface;
 
 function parallel(array $tasks): PromiseInterface
@@ -11,7 +12,7 @@ function parallel(array $tasks): PromiseInterface
 
 function awaitParallel(string $task): PromiseInterface
 {
-    return async(fn() => Defer::awaitTask($task));
+    return async(fn() => Process::await($task));
 }
 
 function spawn(callable $task, array $context = [])

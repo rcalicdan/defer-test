@@ -3,6 +3,7 @@
 namespace Library\Defer\Utilities;
 
 use Library\Defer\Defer;
+use Library\Defer\Process;
 
 /**
  * Process pool manager for limiting concurrent background tasks
@@ -58,7 +59,7 @@ class ProcessPool
     private function checkCompletedTasks(): void
     {
         foreach ($this->activeTasks as $index => $task) {
-            $status = Defer::getTaskStatus($task['task_id']);
+            $status = Process::getTaskStatus($task['task_id']);
 
             if (in_array($status['status'], ['COMPLETED', 'ERROR', 'NOT_FOUND'])) {
                 unset($this->activeTasks[$index]);

@@ -3,6 +3,7 @@
 namespace Library\Defer\Utilities;
 
 use Library\Defer\Defer;
+use Library\Defer\Process;
 
 class TaskAwaiter
 {
@@ -142,7 +143,7 @@ class TaskAwaiter
                     continue;
                 }
 
-                $status = Defer::getTaskStatus($taskId);
+                $status = Process::getTaskStatus($taskId);
                 
                 // Display output as soon as it's available (even for running tasks)
                 if (isset($status['output']) && !empty($status['output']) && !isset($displayedOutput[$taskId])) {
@@ -319,7 +320,7 @@ class TaskAwaiter
                     continue;
                 }
 
-                $status = Defer::getTaskStatus($taskId);
+                $status = Process::getTaskStatus($taskId);
                 
                 // Display output as soon as it's available (even for running tasks)
                 if (isset($status['output']) && !empty($status['output']) && !isset($displayedOutput[$taskId])) {
