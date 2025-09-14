@@ -22,6 +22,20 @@ class Defer
     }
 
     /**
+     * Global-scoped defer - executes at script shutdown
+     *
+     * @param callable $callback The callback to defer
+     */
+    public static function global(callable $callback): void
+    {
+        if (self::$globalHandler === null) {
+            self::$globalHandler = new ProcessDeferHandler;
+        }
+
+        self::$globalHandler->defer($callback);
+    }
+
+    /**
      * Terminate-scoped defer - executes after response is sent
      */
     public static function terminate(callable $callback, bool $forceBackground = false, array $context = []): ?string

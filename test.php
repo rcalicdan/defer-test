@@ -14,7 +14,7 @@ Parallel::all([
     'task3' => fn() => sleep(1),
     'task4' => fn() => sleep(1),
     'task5' => fn() => sleep(1),
-],2);
+]);
 
 
 $end_time = microtime(true);

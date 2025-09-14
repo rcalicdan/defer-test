@@ -1,6 +1,7 @@
 <?php
 
 use Library\Defer\Defer;
+use Library\Defer\Process;
 
 require 'vendor/autoload.php';
 
@@ -64,7 +65,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
         error_log("Global defer delay from request: " . number_format($delayFromRequest, 3) . " seconds");
     });
 
-    $stats = Defer::getStats();
+    $stats = Process::getStats();
     error_log("Defer stats: " . json_encode($stats, JSON_PRETTY_PRINT));
 
     $responseTime = microtime(true);
@@ -102,7 +103,7 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
     echo "<p>This test demonstrates Laravel-style defer functionality that executes <strong>after</strong> the HTTP response is sent.</p>";
 
     // Show current environment info
-    $stats = Defer::getStats();
+    $stats = Process::getStats();
     echo "<h3>Current Environment:</h3>";
     echo "<div style='background: #f0f8ff; padding: 10px; border-radius: 5px; font-family: monospace;'>";
     echo "<strong>PHP SAPI:</strong> " . PHP_SAPI . "<br>";
