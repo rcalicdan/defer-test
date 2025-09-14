@@ -179,6 +179,55 @@ class BackgroundProcessExecutorHandler
         ];
     }
 
+    public function getTemporaryFileStats(): array
+    {
+        $tempDir = $this->systemUtils->getTempDirectory();
+        $logDir = $this->logger->getLogDirectory();
+
+        $taskFiles = glob($tempDir . DIRECTORY_SEPARATOR . 'defer_*.php');
+        $statusFiles = glob($logDir . DIRECTORY_SEPARATOR . '*.status');
+
+        $stats = [
+            'temp_files' => [
+                'count' => count($taskFiles),
+                'total_size' => 0,
+                'oldest' => null,
+                'newest' => null
+            ],
+            'status_files' => [
+                'count' => count($statusFiles),
+                'total_size' => 0,
+                'oldest' => null,
+                'newest' => null
+            ]
+        ];
+
+        // Calculate sizes and ages
+        $taskTimes = [];
+        foreach ($taskFiles as $file) {
+            $stats['temp_files']['total_size'] += filesize($file);
+            $taskTimes[] = filemtime($file);
+        }
+
+        $statusTimes = [];
+        foreach ($statusFiles as $file) {
+            $stats['status_files']['total_size'] += filesize($file);
+            $statusTimes[] = filemtime($file);
+        }
+
+        if (!empty($taskTimes)) {
+            $stats['temp_files']['oldest'] = date('Y-m-d H:i:s', min($taskTimes));
+            $stats['temp_files']['newest'] = date('Y-m-d H:i:s', max($taskTimes));
+        }
+
+        if (!empty($statusTimes)) {
+            $stats['status_files']['oldest'] = date('Y-m-d H:i:s', min($statusTimes));
+            $stats['status_files']['newest'] = date('Y-m-d H:i:s', max($statusTimes));
+        }
+
+        return $stats;
+    }
+
     /**
      * Get health check information
      */
