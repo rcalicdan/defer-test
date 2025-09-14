@@ -101,7 +101,6 @@ class SystemUtilities
                 'detector_files' => ['bin/console', 'symfony.lock'],
                 'init_code' => 'require $bootstrapFile;'
             ],
-            // Add other frameworks as needed
         ];
 
         foreach ($frameworks as $name => $config) {

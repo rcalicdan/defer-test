@@ -397,7 +397,9 @@ PHP;
             }
             pclose($process);
         } else {
-            $cmd = "\"{$phpBinary}\" \"{$taskFile}\" > /dev/null 2>&1 &";
+            $opcacheFlags = '-d opcache.enable_cli=1 -d opcache.jit_buffer_size=100M -d opcache.jit=tracing';
+
+            $cmd = "\"{$phpBinary}\" {$opcacheFlags} \"{$taskFile}\" > /dev/null 2>&1 &";
             $output = [];
             $returnCode = 0;
             exec($cmd, $output, $returnCode);
