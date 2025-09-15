@@ -1,14 +1,35 @@
 <?php
 
+use Library\Defer\AsyncProcess;
+use Library\Defer\Defer;
+
 require 'vendor/autoload.php';
 
-use Library\Defer\Parallel;
+// Traditional usage with automatic Promise resolution
+$taskId = Defer::background(function($context) {
+    // File operations are now non-blocking
+    $content = file_get_contents('/path/to/input.txt');
+    $processed = strtoupper($content);
+    file_put_contents('/path/to/output.txt', $processed);
+    return strlen($processed);
+});
 
-$start_time = microtime(true);
-Parallel::all([
-    fn() => sleep(5),
-    fn() => sleep(5),
-]);
-$end_time = microtime(true);
-$execution_time = $end_time - $start_time;
-echo "Execution time: " . $execution_time . " seconds";
+// Use Promise-based monitoring
+AsyncProcess::monitorAsync($taskId, 30, function($status) {
+    echo "Status update: {$status['status']} - {$status['message']}\n";
+})
+->then(function($finalStatus) {
+    echo "Task completed with status: {$finalStatus['status']}\n";
+})
+->catch(function($error) {
+    echo "Task failed: " . $error->getMessage() . "\n";
+});
+
+// Await with Promise
+AsyncProcess::awaitAsync($taskId, 60)
+    ->then(function($result) {
+        echo "Task result: {$result}\n";
+    })
+    ->catch(function($error) {
+        echo "Task error: " . $error->getMessage() . "\n";
+    });

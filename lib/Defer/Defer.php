@@ -67,7 +67,7 @@ class Defer
         self::$globalHandler = null;
     }
 
-    private static function getHandler(): ProcessDeferHandler
+    public static function getHandler(): ProcessDeferHandler
     {
         if (self::$globalHandler === null) {
             self::$globalHandler = new ProcessDeferHandler;

@@ -314,6 +314,14 @@ class ProcessDeferHandler
         }
     }
 
+    /**
+     * Get background executor
+     */
+    public function getBackgroundExecutor(): BackgroundProcessExecutorHandler
+    {
+        return $this->backgroundExecutor;
+    }
+
     public function getLogDirectory(): string
     {
         return $this->backgroundExecutor->getLogDirectory();
