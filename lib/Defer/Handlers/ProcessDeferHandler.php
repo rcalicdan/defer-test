@@ -2,8 +2,6 @@
 
 namespace Library\Defer\Handlers;
 
-use Library\Defer\Serialization\CallbackSerializationManager;
-
 class ProcessDeferHandler
 {
     /**
@@ -12,19 +10,9 @@ class ProcessDeferHandler
     private static array $globalStack = [];
 
     /**
-     * @var array<callable> Terminate callbacks (executed after response)
-     */
-    private static array $terminateStack = [];
-
-    /**
      * @var bool Whether handlers are registered
      */
     private static bool $handlersRegistered = false;
-
-    /**
-     * @var bool Whether terminate handlers are registered
-     */
-    private static bool $terminateHandlersRegistered = false;
 
     /**
      * @var SignalRegistryHandler|null Signal handler registry instance
@@ -32,26 +20,24 @@ class ProcessDeferHandler
     private static ?SignalRegistryHandler $signalHandler = null;
 
     /**
-     * @var CallbackSerializationManager Serialization manager
+     * @var TerminateHandler Terminate handler instance
      */
-    private CallbackSerializationManager $serializationManager;
+    private TerminateHandler $terminateHandler;
 
     /**
-     * @var BackgroundProcessExecutorHandler Background process executor
+     * @var BackgroundTaskManager Background task manager
      */
-    private BackgroundProcessExecutorHandler $backgroundExecutor;
+    private BackgroundTaskManager $backgroundTaskManager;
 
     public function __construct()
     {
         $this->registerShutdownHandlers();
-        $this->serializationManager = new CallbackSerializationManager();
-        $this->backgroundExecutor = new BackgroundProcessExecutorHandler($this->serializationManager);
+        $this->terminateHandler = new TerminateHandler();
+        $this->backgroundTaskManager = new BackgroundTaskManager();
     }
 
     /**
      * Create a function-scoped defer handler
-     *
-     * @return FunctionScopeHandler New function-scoped handler
      */
     public static function createFunctionDefer(): FunctionScopeHandler
     {
@@ -60,8 +46,6 @@ class ProcessDeferHandler
 
     /**
      * Add a global defer
-     *
-     * @param callable $callback The callback to defer
      */
     public function defer(callable $callback): void
     {
@@ -69,30 +53,23 @@ class ProcessDeferHandler
     }
 
     /**
-     * Determine if we should use background process execution
-     *
-     * @return bool True if background execution should be used
-     */
-    private function shouldUseBackgroundExecution(): bool
-    {
-        return PHP_SAPI === 'cli-server' || // Built-in dev server
-            PHP_SAPI === 'cli' ||        // CLI environment
-            !function_exists('fastcgi_finish_request') || // No FastCGI
-            !$this->isFastCgiEnvironment(); // Not in FastCGI environment
-    }
-
-    /**
-     * Add a terminate callback with optional background execution and monitoring
+     * Add a terminate callback with optional background execution
      */
     public function terminate(callable $callback, bool $forceBackground = false, array $context = []): ?string
     {
         // Check if we should use background process execution
-        if ($forceBackground || $this->shouldUseBackgroundExecution()) {
-            return $this->executeInBackground($callback, $context);
+        if ($forceBackground || $this->terminateHandler->shouldUseBackgroundExecution()) {
+            try {
+                return $this->backgroundTaskManager->execute($callback, $context);
+            } catch (\Throwable $e) {
+                error_log('Background execution failed, falling back to shutdown function: ' . $e->getMessage());
+                // Fallback to traditional method
+                $this->terminateHandler->addCallback($callback);
+                throw $e;
+            }
         } else {
-            // Use traditional FastCGI method if available
-            $this->addToTerminateStack($callback);
-            $this->registerTerminateHandlers();
+            // Use traditional method
+            $this->terminateHandler->addCallback($callback);
             return null; // No task ID for traditional execution
         }
     }
@@ -102,235 +79,54 @@ class ProcessDeferHandler
      */
     public function executeBackground(callable $callback, array $context = []): string
     {
-        return $this->executeInBackground($callback, $context);
+        return $this->backgroundTaskManager->execute($callback, $context);
     }
 
-    /**
-     * Updated executeInBackground to return task ID
-     */
-    private function executeInBackground(callable $callback, array $context = []): string
-    {
-        try {
-            $taskId = $this->backgroundExecutor->execute($callback, $context);
-            return $taskId;
-        } catch (\Throwable $e) {
-            error_log('Background execution failed, falling back to shutdown function: ' . $e->getMessage());
-            // Fallback to shutdown function
-            $this->addToTerminateStack($callback);
-            $this->registerTerminateHandlers();
-            throw $e; // Re-throw to indicate background execution failed
-        }
-    }
-
-    /**
-     * Delegate to background executor
-     */
     public function getTaskStatus(string $taskId): array
     {
-        return $this->backgroundExecutor->getTaskStatus($taskId);
+        return $this->backgroundTaskManager->getTaskStatus($taskId);
     }
 
-    /**
-     * Delegate to background executor
-     */
     public function getAllTasksStatus(): array
     {
-        return $this->backgroundExecutor->getAllTasksStatus();
+        return $this->backgroundTaskManager->getAllTasksStatus();
     }
 
-    /**
-     * Delegate to background executor
-     */
     public function getTasksSummary(): array
     {
-        return $this->backgroundExecutor->getTasksSummary();
+        return $this->backgroundTaskManager->getTasksSummary();
     }
 
-    /**
-     * Delegate to background executor
-     */
     public function getRecentLogs(int $limit = 100): array
     {
-        return $this->backgroundExecutor->getRecentLogs($limit);
+        return $this->backgroundTaskManager->getRecentLogs($limit);
     }
 
-    /**
-     * Delegate to background executor
-     */
     public function cleanupOldTasks(int $maxAgeHours = 24): int
     {
-        return $this->backgroundExecutor->cleanupOldTasks($maxAgeHours);
+        return $this->backgroundTaskManager->cleanupOldTasks($maxAgeHours);
     }
 
-    /**
-     * Add callback to terminate stack (traditional method)
-     *
-     * @param callable $callback The callback to add
-     */
-    private function addToTerminateStack(callable $callback): void
-    {
-        if (count(self::$terminateStack) >= 50) {
-            array_shift(self::$terminateStack);
-        }
-
-        self::$terminateStack[] = $callback;
-    }
-
-    /**
-     * Register terminate handlers based on environment
-     */
-    private function registerTerminateHandlers(): void
-    {
-        if (self::$terminateHandlersRegistered) {
-            return;
-        }
-
-        if ($this->isFastCgiEnvironment()) {
-            $this->registerFastCgiTerminateHandler();
-        } elseif (PHP_SAPI === 'cli') {
-            $this->registerCliTerminateHandler();
-        } elseif (PHP_SAPI === 'cli-server') {
-            $this->registerDevServerTerminateHandler();
-        } else {
-            $this->registerFallbackTerminateHandler();
-        }
-
-        self::$terminateHandlersRegistered = true;
-    }
-
-    /**
-     * Check if running in FastCGI environment
-     *
-     * @return bool True if FastCGI environment detected
-     */
-    private function isFastCgiEnvironment(): bool
-    {
-        return PHP_SAPI === 'fpm-fcgi' ||
-            PHP_SAPI === 'cgi-fcgi' ||
-            function_exists('fastcgi_finish_request');
-    }
-
-    /**
-     * Register FastCGI terminate handler (like Laravel's implementation)
-     */
-    private function registerFastCgiTerminateHandler(): void
-    {
-        register_shutdown_function(function () {
-            if (function_exists('fastcgi_finish_request')) {
-                fastcgi_finish_request();
-            }
-
-            $this->executeTerminateCallbacks();
-        });
-    }
-
-    /**
-     * Register CLI terminate handler
-     */
-    private function registerCliTerminateHandler(): void
-    {
-        register_tick_function(function () {
-            static $executed = false;
-
-            if (!$executed && $this->isScriptEnding()) {
-                $executed = true;
-                $this->executeTerminateCallbacks();
-            }
-        });
-
-        declare(ticks=100);
-    }
-
-    /**
-     * Special handler for PHP built-in development server
-     */
-    private function registerDevServerTerminateHandler(): void
-    {
-        register_shutdown_function(function () {
-            if (ob_get_level() > 0) {
-                while (ob_get_level() > 0) {
-                    ob_end_flush();
-                }
-            }
-            flush();
-
-            $this->executeTerminateCallbacks();
-        });
-    }
-
-    /**
-     * Register fallback terminate handler
-     */
-    private function registerFallbackTerminateHandler(): void
-    {
-        if (ob_get_level() === 0) {
-            ob_start();
-        }
-
-        register_shutdown_function(function () {
-            while (ob_get_level() > 0) {
-                ob_end_flush();
-            }
-
-            $this->executeTerminateCallbacks();
-        });
-    }
-
-    /**
-     * Check if script is ending (for CLI)
-     *
-     * @return bool True if script execution is ending
-     */
-    private function isScriptEnding(): bool
-    {
-        $backtrace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2);
-        return empty($backtrace) ||
-            (count($backtrace) === 1 && !isset($backtrace[0]['function']));
-    }
-
-    /**
-     * Execute all terminate callbacks
-     */
-    private function executeTerminateCallbacks(): void
-    {
-        if (empty(self::$terminateStack)) {
-            return;
-        }
-
-        try {
-            foreach (self::$terminateStack as $index => $callback) {
-                try {
-                    if (is_callable($callback)) {
-                        $callback();
-                    }
-                } catch (\Throwable $e) {
-                    error_log('Terminate callback error: ' . $e->getMessage());
-                } finally {
-                    unset(self::$terminateStack[$index]);
-                }
-            }
-        } finally {
-            self::$terminateStack = [];
-        }
-    }
-
-    /**
-     * Get background executor
-     */
     public function getBackgroundExecutor(): BackgroundProcessExecutorHandler
     {
-        return $this->backgroundExecutor;
+        return $this->backgroundTaskManager->getBackgroundExecutor();
     }
 
     public function getLogDirectory(): string
     {
-        return $this->backgroundExecutor->getLogDirectory();
+        return $this->backgroundTaskManager->getLogDirectory();
+    }
+
+    /**
+     * Manual execution of terminate callbacks (for testing)
+     */
+    public function executeTerminate(): void
+    {
+        $this->terminateHandler->executeCallbacks();
     }
 
     /**
      * Add callback to global stack
-     *
-     * @param callable $callback The callback to add
      */
     private function addToGlobalStack(callable $callback): void
     {
@@ -343,8 +139,6 @@ class ProcessDeferHandler
 
     /**
      * Execute stack in LIFO order
-     *
-     * @param array $stack The stack to execute
      */
     private function executeStack(array $stack): void
     {
@@ -374,14 +168,6 @@ class ProcessDeferHandler
     }
 
     /**
-     * Manual execution of terminate callbacks (for testing)
-     */
-    public function executeTerminate(): void
-    {
-        $this->executeTerminateCallbacks();
-    }
-
-    /**
      * Register shutdown handlers
      */
     private function registerShutdownHandlers(): void
@@ -408,35 +194,27 @@ class ProcessDeferHandler
 
     /**
      * Enhanced statistics including background execution capabilities
-     *
-     * @return array Comprehensive statistics
      */
     public function getStats(): array
     {
         $baseStats = [
             'global_defers' => count(self::$globalStack),
-            'terminate_callbacks' => count(self::$terminateStack),
+            'terminate_callbacks' => $this->terminateHandler->getCallbackCount(),
             'memory_usage' => memory_get_usage(true),
-            'background_execution' => $this->shouldUseBackgroundExecution(),
+            'background_execution' => $this->terminateHandler->shouldUseBackgroundExecution(),
         ];
 
-        $backgroundStats = $this->backgroundExecutor->getStats();
+        $backgroundStats = $this->backgroundTaskManager->getStats();
+        $environmentStats = $this->terminateHandler->getEnvironmentInfo();
 
         return array_merge($baseStats, [
             'background' => $backgroundStats,
-            'environment' => [
-                'sapi' => PHP_SAPI,
-                'fastcgi' => $this->isFastCgiEnvironment(),
-                'fastcgi_finish_request' => function_exists('fastcgi_finish_request'),
-                'output_buffering' => ob_get_level() > 0,
-            ],
+            'environment' => $environmentStats,
         ]);
     }
 
     /**
      * Get signal handling capabilities info
-     *
-     * @return array Signal handling information
      */
     public function getSignalHandlingInfo(): array
     {
@@ -483,12 +261,9 @@ class ProcessDeferHandler
 
     /**
      * Test background execution capabilities
-     *
-     * @param bool $verbose Whether to output detailed information
-     * @return array Test results
      */
     public function testBackgroundExecution(bool $verbose = false): array
     {
-        return $this->backgroundExecutor->testCapabilities($verbose);
+        return $this->backgroundTaskManager->testCapabilities($verbose);
     }
 }
