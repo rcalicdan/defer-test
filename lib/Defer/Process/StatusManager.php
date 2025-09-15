@@ -9,7 +9,7 @@ use Library\Defer\Logging\BackgroundLogger;
  */
 class StatusManager
 {
-    private string $logDir;
+    protected string $logDir;
 
     public function __construct(string $logDir)
     {
@@ -367,7 +367,7 @@ class StatusManager
     /**
      * Get callable type for logging
      */
-    private function getCallableType(callable $callback): string
+    protected function getCallableType(callable $callback): string
     {
         if (is_string($callback)) {
             return 'function';

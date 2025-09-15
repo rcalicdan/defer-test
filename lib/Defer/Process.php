@@ -10,9 +10,9 @@ use Library\Defer\Utilities\LazyTask;
  */
 class Process
 {
-    private static ?ProcessDeferHandler $handler = null;
+    protected static ?ProcessDeferHandler $handler = null;
 
-    private static function getHandler(): ProcessDeferHandler
+    protected static function getHandler(): ProcessDeferHandler
     {
         if (self::$handler === null) {
             self::$handler = new ProcessDeferHandler;

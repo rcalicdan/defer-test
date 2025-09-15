@@ -286,6 +286,11 @@ class BackgroundProcessExecutorHandler
         return $this->taskRegistry->getAllTasks();
     }
 
+    public function getStatusManager(): StatusManager
+    {
+        return $this->statusManager;
+    }
+
     public function clearCompletedTasks(int $maxAge = 3600): int
     {
         return $this->taskRegistry->clearCompletedTasks($maxAge, $this->statusManager);
