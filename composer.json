@@ -1,4 +1,5 @@
 {
+    "name": "rcalicdan/defer-test",
     "autoload": {
         "psr-4": {
             "Library\\": "lib/"
