@@ -1,5 +1,6 @@
 {
     "name": "rcalicdan/defer-test",
+    "minimum-stability": "dev",
     "autoload": {
         "psr-4": {
             "Library\\": "lib/"
