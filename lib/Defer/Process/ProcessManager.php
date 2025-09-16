@@ -183,17 +183,22 @@ class ProcessManager
         $frameworkInitCode = $frameworkInfo['init_code'] ?? '';
         $escapedBootstrapFile = addslashes($frameworkBootstrap);
 
+        $loggingEnabled = $this->config->get('logging.enabled', true);
+        $logDirectory = $this->config->get('logging.directory', null);
+        $loggingEnabledStr = $loggingEnabled ? 'true' : 'false';
+        $logDirectoryStr = $logDirectory ? "'" . addslashes($logDirectory) . "'" : 'null';
+
         return <<<PHP
 <?php
 /**
- * Auto-generated background task script with comprehensive monitoring and output capture
+ * Background task with automatic cleanup
  * Task ID: {$taskId}
  * Generated at: {$generatedAt}
  */
 
 declare(strict_types=1);
 
-// FORK BOMB PROTECTION: Mark this as a background process
+// FORK BOMB PROTECTION
 putenv('DEFER_BACKGROUND_PROCESS=1');
 \$_ENV['DEFER_BACKGROUND_PROCESS'] = '1';
 
@@ -208,9 +213,90 @@ ini_set('log_errors', '1');
 \$statusFile = '{$statusFile}';
 \$startTime = microtime(true);
 \$pid = getmypid();
-
-// Initialize output buffer for capturing prints/echos
 \$capturedOutput = '';
+\$taskFile = __FILE__;
+
+// Configuration from parent process (embedded at generation time)
+\$LOGGING_ENABLED = {$loggingEnabledStr};
+\$LOG_DIRECTORY = {$logDirectoryStr};
+
+// Check if status file should be cleaned up after task completion
+function shouldCleanupStatusFile() {
+    global \$LOGGING_ENABLED, \$LOG_DIRECTORY;
+    // Clean up status file if:
+    // 1. Logging is disabled, OR
+    // 2. Logging is enabled but no persistent directory is configured (using temp dir)
+    return !\$LOGGING_ENABLED || empty(\$LOG_DIRECTORY);
+}
+
+// Cleanup function for immediate cleanup (errors, signals)
+function performImmediateCleanup() {
+    global \$taskFile, \$statusFile;
+    
+    // Always clean up task file
+    for (\$attempt = 0; \$attempt < 5; \$attempt++) {
+        if (!file_exists(\$taskFile)) {
+            break;
+        }
+        
+        if (@unlink(\$taskFile)) {
+            break;
+        }
+        
+        usleep(100000); // 100ms
+        
+        \$tempName = \$taskFile . '.delete.' . time() . '.' . \$attempt;
+        if (@rename(\$taskFile, \$tempName)) {
+            @unlink(\$tempName);
+            break;
+        }
+    }
+    
+    // Only delete status file immediately on errors/signals if cleanup is needed
+    if (shouldCleanupStatusFile() && file_exists(\$statusFile)) {
+        @unlink(\$statusFile);
+    }
+}
+
+// Delayed cleanup function for successful completion
+function performDelayedCleanup() {
+    global \$taskFile, \$statusFile;
+    
+    // Always clean up task file
+    for (\$attempt = 0; \$attempt < 5; \$attempt++) {
+        if (!file_exists(\$taskFile)) {
+            break;
+        }
+        
+        if (@unlink(\$taskFile)) {
+            break;
+        }
+        
+        usleep(10000); // 10ms
+        
+        \$tempName = \$taskFile . '.delete.' . time() . '.' . \$attempt;
+        if (@rename(\$taskFile, \$tempName)) {
+            @unlink(\$tempName);
+            break;
+        }
+    }
+    
+    // For successful completion, wait a bit longer before cleanup to allow status file reading
+    if (shouldCleanupStatusFile() && file_exists(\$statusFile)) {
+        // Wait 200ms to ensure any awaiting process can read the status file
+        usleep(200000); // 200ms
+        @unlink(\$statusFile);
+    }
+}
+
+// Register cleanup for graceful shutdown
+register_shutdown_function('performDelayedCleanup');
+
+// Handle signals for immediate cleanup
+if (function_exists('pcntl_signal')) {
+    pcntl_signal(SIGTERM, function() { performImmediateCleanup(); exit(0); });
+    pcntl_signal(SIGINT, function() { performImmediateCleanup(); exit(0); });
+}
 
 function updateTaskStatus(\$status, \$message = '', \$extra = []) {
     global \$taskId, \$statusFile, \$startTime, \$pid, \$capturedOutput;
@@ -225,12 +311,9 @@ function updateTaskStatus(\$status, \$message = '', \$extra = []) {
         'memory_peak' => memory_get_peak_usage(true),
         'pid' => \$pid,
         'created_at' => '{$generatedAt}',
-        'updated_at' => date('Y-m-d H:i:s'),
-        'php_version' => PHP_VERSION,
-        'os_family' => PHP_OS_FAMILY
+        'updated_at' => date('Y-m-d H:i:s')
     ], \$extra);
     
-    // Include captured output if any
     if (!empty(\$capturedOutput)) {
         \$statusData['output'] = \$capturedOutput;
     }
@@ -249,26 +332,22 @@ function logError(\$e) {
         'stack_trace' => \$e->getTraceAsString()
     ];
     
-    // Include any captured output with the error
     if (!empty(\$capturedOutput)) {
         \$errorInfo['output'] = \$capturedOutput;
     }
     
     updateTaskStatus('ERROR', 'Task failed: ' . \$e->getMessage(), \$errorInfo);
-    error_log("❌ Background task error: " . \$e->getMessage());
 }
 
-// Custom output handler to capture all output
 function captureOutput(\$buffer) {
     global \$capturedOutput;
     \$capturedOutput .= \$buffer;
-    return \$buffer; // Return buffer to continue normal output buffering
+    return \$buffer;
 }
 
 try {
     updateTaskStatus('RUNNING', 'Task started execution');
     
-    // Load autoloader
     if (file_exists('{$autoloadPath}')) {
         require_once '{$autoloadPath}';
         updateTaskStatus('RUNNING', 'Autoloader loaded successfully');
@@ -276,7 +355,6 @@ try {
         throw new RuntimeException('Autoloader not found at: {$autoloadPath}');
     }
 
-    // Load framework bootstrap if detected
     if ('{$frameworkName}' !== 'none' && '{$escapedBootstrapFile}' !== '') {
         \$bootstrapFile = '{$escapedBootstrapFile}';
         if (file_exists(\$bootstrapFile)) {
@@ -289,7 +367,6 @@ try {
         }
     }
     
-    // Restore context and callback
     \$context = {$serializedContext};
     \$callback = {$serializedCallback};
     
@@ -297,24 +374,17 @@ try {
         throw new RuntimeException('Deserialized callback is not callable');
     }
     
-    // Start output buffering with our custom handler to capture all output
     ob_start('captureOutput');
-    
-    // Update status before callback execution
     updateTaskStatus('RUNNING', 'Executing callback');
     
     try {
-        // Execute the callback
         \$reflection = new ReflectionFunction(\$callback instanceof Closure ? \$callback : Closure::fromCallable(\$callback));
         \$paramCount = \$reflection->getNumberOfParameters();
         
         \$result = \$paramCount > 0 && !empty(\$context) ? \$callback(\$context) : \$callback();
-        
-        // Flush and capture any remaining output
         ob_end_flush();
         
     } catch (Throwable \$callbackError) {
-        // Make sure to capture any output even if callback fails
         ob_end_flush();
         throw \$callbackError;
     }
@@ -330,7 +400,6 @@ try {
         \$resultInfo['result'] = \$result;
         \$resultInfo['result_type'] = gettype(\$result);
         
-        // If result is too large, truncate it for status file
         if (is_string(\$result) && strlen(\$result) > 1000) {
             \$resultInfo['result_truncated'] = true;
             \$resultInfo['result'] = substr(\$result, 0, 1000) . '... (truncated)';
@@ -342,45 +411,38 @@ try {
         }
     }
     
-    // Include captured output statistics
     if (!empty(\$capturedOutput)) {
         \$resultInfo['output_length'] = strlen(\$capturedOutput);
         \$resultInfo['output_lines'] = substr_count(\$capturedOutput, "\n") + 1;
         
-        // If output is too large, truncate it for status file
         if (strlen(\$capturedOutput) > 2000) {
             \$resultInfo['output_truncated'] = true;
-            \$resultInfo['full_output'] = \$capturedOutput; // Keep full output
-            // Don't truncate in global variable, let updateTaskStatus handle it
+            \$resultInfo['full_output'] = \$capturedOutput;
         }
     }
     
     updateTaskStatus('COMPLETED', "Task completed successfully in " . number_format(\$duration, 3) . " seconds", \$resultInfo);
     
 } catch (Throwable \$e) {
-    // Ensure output buffer is cleaned up
     if (ob_get_level()) {
         ob_end_clean();
     }
     
     logError(\$e);
+    performImmediateCleanup();
     exit(1);
 } finally {
-    // Clean up output buffer if still active
     while (ob_get_level()) {
         ob_end_clean();
     }
     
-    // Clean up task file
-    if (file_exists(__FILE__)) {
-        @unlink(__FILE__);
-    }
+    // Note: performDelayedCleanup() is called via register_shutdown_function
+    // This ensures proper cleanup timing even if the script exits normally
 }
 
 exit(0);
 PHP;
     }
-
     /**
      * Spawn background process with platform-specific handling
      */
