@@ -64,7 +64,7 @@ class TaskAwaiter
     }
 
     /**
-     * Await tasks using process pool (handles lazy tasks properly)
+     * Await tasks using process pool (handles lazy tasks properly without reflection)
      */
     private static function awaitAllWithPool(
         array $tasks, 
@@ -81,15 +81,7 @@ class TaskAwaiter
                 $lazyTask = LazyTask::get($item);
                 if ($lazyTask) {
                     $poolTasks[$key] = [
-                        'callback' => function() use ($lazyTask) {
-                            // Get the original callback from the lazy task
-                            $reflection = new \ReflectionClass($lazyTask);
-                            $callbackProp = $reflection->getProperty('callback');
-                            $callbackProp->setAccessible(true);
-                            $callback = $callbackProp->getValue($lazyTask);
-                            
-                            return call_user_func($callback);
-                        },
+                        'callback' => $lazyTask->getCallback(), // Use public method instead of reflection
                         'context' => $lazyTask->getContext()
                     ];
                 } else {
@@ -263,7 +255,6 @@ class TaskAwaiter
         int $maxConcurrentTasks, 
         int $pollIntervalMs
     ): array {
-        // Same implementation as awaitAllWithPool but use awaitTaskIdsSettledWithOutput at the end
         $pool = new ProcessPool($maxConcurrentTasks, $pollIntervalMs);
         
         $poolTasks = [];
@@ -272,14 +263,7 @@ class TaskAwaiter
                 $lazyTask = LazyTask::get($item);
                 if ($lazyTask) {
                     $poolTasks[$key] = [
-                        'callback' => function() use ($lazyTask) {
-                            $reflection = new \ReflectionClass($lazyTask);
-                            $callbackProp = $reflection->getProperty('callback');
-                            $callbackProp->setAccessible(true);
-                            $callback = $callbackProp->getValue($lazyTask);
-                            
-                            return call_user_func($callback);
-                        },
+                        'callback' => $lazyTask->getCallback(), // Use public method instead of reflection
                         'context' => $lazyTask->getContext()
                     ];
                 } else {

@@ -63,6 +63,14 @@ class LazyTask
     }
 
     /**
+     * Get the callback (public method to avoid reflection)
+     */
+    public function getCallback(): callable
+    {
+        return $this->callback;
+    }
+
+    /**
      * Get the context
      */
     public function getContext(): array

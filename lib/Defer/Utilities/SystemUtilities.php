@@ -38,8 +38,13 @@ class SystemUtilities
         }
 
         $possiblePaths = [
-            'php', 'php.exe', '/usr/bin/php', '/usr/local/bin/php',
-            '/opt/php/bin/php', 'C:\\php\\php.exe', 'C:\\Program Files\\PHP\\php.exe',
+            'php',
+            'php.exe',
+            '/usr/bin/php',
+            '/usr/local/bin/php',
+            '/opt/php/bin/php',
+            'C:\\php\\php.exe',
+            'C:\\Program Files\\PHP\\php.exe',
         ];
 
         foreach ($possiblePaths as $path) {
@@ -68,19 +73,26 @@ class SystemUtilities
     public function findAutoloadPath(): string
     {
         $possiblePaths = [
+            getcwd() . '/vendor/autoload.php',
+            getcwd() . '/../vendor/autoload.php',
             __DIR__ . '/../../../../vendor/autoload.php',
             __DIR__ . '/../../../vendor/autoload.php',
             __DIR__ . '/../../vendor/autoload.php',
             __DIR__ . '/../vendor/autoload.php',
             dirname($_SERVER['SCRIPT_FILENAME'] ?? __FILE__) . '/vendor/autoload.php',
-            getcwd() . '/vendor/autoload.php',
+            dirname($_SERVER['SCRIPT_FILENAME'] ?? __FILE__) . '/../vendor/autoload.php',
+
+            ($_SERVER['DOCUMENT_ROOT'] ?? '') . '/../vendor/autoload.php',
         ];
 
+        $possiblePaths = array_filter(array_unique($possiblePaths));
+
         foreach ($possiblePaths as $path) {
-            if (file_exists($path)) {
+            if (file_exists($path) && is_readable($path)) {
                 return realpath($path);
             }
         }
+
 
         return 'vendor/autoload.php';
     }
@@ -139,7 +151,7 @@ class SystemUtilities
     public function getDiskUsage(): array
     {
         $tempDirSize = $this->getDirectorySize($this->tempDir);
-        
+
         return [
             'temp_dir_size' => $tempDirSize,
             'temp_dir_files' => count(glob($this->tempDir . DIRECTORY_SEPARATOR . '*')),
