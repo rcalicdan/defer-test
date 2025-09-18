@@ -443,9 +443,8 @@ try {
 exit(0);
 PHP;
     }
-
     /**
-     * Spawn background process with platform-specific and environment-aware handling
+     * Spawn background process with platform-specific handling
      */
     private function spawnBackgroundProcess(string $taskFile): void
     {
@@ -453,174 +452,23 @@ PHP;
         $taskId = basename($taskFile, '.php');
 
         if (PHP_OS_FAMILY === 'Windows') {
-            $this->spawnWindowsProcess($phpBinary, $taskFile, $taskId);
+            $cmd = "start /B \"\" \"{$phpBinary}\" \"{$taskFile}\" >nul 2>nul";
+            $process = popen($cmd, 'r');
+            if ($process === false) {
+                throw new \RuntimeException("Failed to spawn Windows background process for task: {$taskId}");
+            }
+            pclose($process);
         } else {
-            $this->spawnUnixProcess($phpBinary, $taskFile, $taskId);
-        }
-    }
+            $opcacheFlags = '-d opcache.enable_cli=1 -d opcache.jit_buffer_size=100M -d opcache.jit=tracing';
 
-    private function spawnWindowsProcess(string $phpBinary, string $taskFile, string $taskId): void
-    {
-        // Try modern approach first (Windows 10+, containers)
-        $methods = [
-            // Method 1: PowerShell Start-Process (most reliable in containers)
-            function () use ($phpBinary, $taskFile) {
-                $cmd = "powershell -Command \"Start-Process -FilePath '{$phpBinary}' -ArgumentList '{$taskFile}' -WindowStyle Hidden -PassThru\"";
-                return $this->executeCommand($cmd);
-            },
+            $cmd = "\"{$phpBinary}\" {$opcacheFlags} \"{$taskFile}\" > /dev/null 2>&1 &";
+            $output = [];
+            $returnCode = 0;
+            exec($cmd, $output, $returnCode);
 
-            // Method 2: Traditional start command
-            function () use ($phpBinary, $taskFile) {
-                $cmd = "start /B \"\" \"{$phpBinary}\" \"{$taskFile}\" >nul 2>nul";
-                $process = popen($cmd, 'r');
-                if ($process !== false) {
-                    pclose($process);
-                    return true;
-                }
-                return false;
-            },
-
-            // Method 3: Direct execution (fallback for restricted environments)
-            function () use ($phpBinary, $taskFile) {
-                $cmd = "\"{$phpBinary}\" \"{$taskFile}\"";
-                return $this->executeCommandBackground($cmd);
-            }
-        ];
-
-        foreach ($methods as $method) {
-            if ($method()) {
-                return;
+            if ($returnCode !== 0) {
+                throw new \RuntimeException("Failed to spawn Unix background process for task: {$taskId}, return code: {$returnCode}");
             }
         }
-
-        throw new \RuntimeException("Failed to spawn Windows background process for task: {$taskId}");
-    }
-
-    private function spawnUnixProcess(string $phpBinary, string $taskFile, string $taskId): void
-    {
-        $isRestricted = $this->isRestrictedEnvironment();
-
-        $methods = [
-            function () use ($phpBinary, $taskFile, $isRestricted) {
-                if ($isRestricted) {
-                    // Simplified flags for restricted environments
-                    $cmd = "nohup \"{$phpBinary}\" \"{$taskFile}\" >/dev/null 2>&1 &";
-                } else {
-                    $opcacheFlags = '-d opcache.enable_cli=1 -d opcache.jit_buffer_size=100M -d opcache.jit=tracing';
-                    $cmd = "nohup \"{$phpBinary}\" {$opcacheFlags} \"{$taskFile}\" >/dev/null 2>&1 &";
-                }
-                return $this->executeCommand($cmd);
-            },
-
-            function () use ($phpBinary, $taskFile, $isRestricted) {
-                if ($isRestricted) {
-                    $cmd = "\"{$phpBinary}\" \"{$taskFile}\" >/dev/null 2>&1 &";
-                } else {
-                    $opcacheFlags = '-d opcache.enable_cli=1 -d opcache.jit_buffer_size=100M -d opcache.jit=tracing';
-                    $cmd = "\"{$phpBinary}\" {$opcacheFlags} \"{$taskFile}\" >/dev/null 2>&1 &";
-                }
-                return $this->executeCommand($cmd);
-            },
-
-            function () use ($phpBinary, $taskFile, $isRestricted) {
-                return $this->spawnWithProcOpen($phpBinary, $taskFile, $isRestricted);
-            },
-
-            function () use ($phpBinary, $taskFile) {
-                $cmd = "\"{$phpBinary}\" \"{$taskFile}\"";
-                return $this->executeCommandBackground($cmd);
-            }
-        ];
-
-        foreach ($methods as $method) {
-            if ($method()) {
-                return;
-            }
-        }
-
-        throw new \RuntimeException("Failed to spawn Unix background process for task: {$taskId}");
-    }
-
-    private function executeCommand(string $cmd): bool
-    {
-        $output = [];
-        $returnCode = 0;
-        exec($cmd, $output, $returnCode);
-
-        return in_array($returnCode, [0, 127]) || $this->isRestrictedEnvironment();
-    }
-
-    private function executeCommandBackground(string $cmd): bool
-    {
-        try {
-            $descriptorSpec = [
-                0 => ['pipe', 'r'],
-                1 => ['file', '/dev/null', 'w'],
-                2 => ['file', '/dev/null', 'w']
-            ];
-
-            $process = proc_open($cmd, $descriptorSpec, $pipes);
-            if (is_resource($process)) {
-                fclose($pipes[0]);
-            
-                return true;
-            }
-        } catch (\Throwable $e) {
-            exec($cmd . ' &');
-            return true;
-        }
-
-        return false;
-    }
-
-    private function spawnWithProcOpen(string $phpBinary, string $taskFile, bool $isRestricted): bool
-    {
-        try {
-            $cmd = [$phpBinary];
-
-            if (!$isRestricted) {
-                $cmd = array_merge($cmd, [
-                    '-d',
-                    'opcache.enable_cli=1',
-                    '-d',
-                    'opcache.jit_buffer_size=100M',
-                    '-d',
-                    'opcache.jit=tracing'
-                ]);
-            }
-
-            $cmd[] = $taskFile;
-
-            $descriptorSpec = [
-                0 => ['pipe', 'r'],  
-                1 => ['pipe', 'w'],  
-                2 => ['pipe', 'w']
-            ];
-
-            $process = proc_open($cmd, $descriptorSpec, $pipes, null, $_ENV);
-
-            if (is_resource($process)) {
-                fclose($pipes[0]);
-                fclose($pipes[1]);
-                fclose($pipes[2]);
-
-                return true;
-            }
-        } catch (\Throwable $e) {
-            // Method failed, try next one
-        }
-
-        return false;
-    }
-
-    private function isRestrictedEnvironment(): bool
-    {
-        return !empty(getenv('RAILWAY_ENVIRONMENT')) ||
-            !empty(getenv('VERCEL')) ||
-            !empty(getenv('HEROKU')) ||
-            !empty(getenv('AWS_LAMBDA_FUNCTION_NAME')) ||
-            file_exists('/.dockerenv') ||
-            !is_writable('/tmp') ||
-            !function_exists('exec');
     }
 }
