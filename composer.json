@@ -11,6 +11,7 @@
     },
     "require": {
         "opis/closure": "^4.3",
-        "rcalicdan/fiber-async": "dev-main"
+        "rcalicdan/fiber-async": "dev-main",
+        "symfony/process": "8.0.x-dev"
     }
 }
