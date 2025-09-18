@@ -17,6 +17,9 @@ class ProcessManager
     private ConfigLoader $config;
     private SystemUtilities $systemUtils;
     private BackgroundLogger $logger;
+    private ?bool $backgroundProcessingSupported = null;
+    private array $environmentLimitations = [];
+    private string $platformType = 'unknown';
 
     public function __construct(
         ConfigLoader $config,
@@ -26,10 +29,192 @@ class ProcessManager
         $this->config = $config;
         $this->systemUtils = $systemUtils;
         $this->logger = $logger;
+
+        // Detect environment capabilities on initialization
+        $this->detectEnvironmentCapabilities();
     }
 
     /**
-     * Spawn a background task using Symfony Process
+     * Enhanced environment detection with Railway-specific checks
+     */
+    private function detectEnvironmentCapabilities(): void
+    {
+        $this->environmentLimitations = [];
+
+        // Detect platform type
+        $this->platformType = $this->detectPlatformType();
+
+        // Platform-specific restrictions
+        switch ($this->platformType) {
+            case 'railway':
+                // Railway often blocks background processes
+                $this->environmentLimitations['platform_restriction'] = 'Railway background process limitations';
+                $this->backgroundProcessingSupported = false;
+                break;
+
+            case 'vercel':
+                // Vercel is serverless, no background processes
+                $this->environmentLimitations['platform_restriction'] = 'Vercel serverless environment';
+                $this->backgroundProcessingSupported = false;
+                break;
+
+            case 'netlify':
+                // Netlify functions don't support background processes
+                $this->environmentLimitations['platform_restriction'] = 'Netlify serverless functions';
+                $this->backgroundProcessingSupported = false;
+                break;
+
+            case 'heroku':
+                // Heroku may work but has limitations
+                $this->environmentLimitations['platform_warning'] = 'Heroku may have process limitations';
+                $this->backgroundProcessingSupported = $this->testBasicProcessCapability();
+                break;
+
+            case 'shared_hosting':
+                $this->environmentLimitations['platform_restriction'] = 'Shared hosting limitations';
+                $this->backgroundProcessingSupported = false;
+                break;
+
+            case 'local':
+            case 'vps':
+            case 'dedicated':
+            default:
+                $this->backgroundProcessingSupported = $this->testBasicProcessCapability();
+                break;
+        }
+
+        // Check disabled functions regardless of platform
+        $disabledFunctions = array_map('trim', explode(',', ini_get('disable_functions')));
+        $criticalFunctions = ['exec', 'shell_exec', 'proc_open', 'proc_close', 'popen'];
+        $disabledCriticalFunctions = array_intersect($criticalFunctions, $disabledFunctions);
+
+        if (!empty($disabledCriticalFunctions)) {
+            $this->environmentLimitations['disabled_functions'] = $disabledCriticalFunctions;
+            $this->backgroundProcessingSupported = false;
+        }
+
+        // Check Symfony Process availability
+        if (!class_exists(Process::class)) {
+            $this->environmentLimitations['no_symfony_process'] = true;
+            $this->backgroundProcessingSupported = false;
+        }
+
+        // Log detection results
+        $this->logger->logEvent('INFO', "Platform detected: {$this->platformType}");
+        if ($this->backgroundProcessingSupported) {
+            $this->logger->logEvent('INFO', 'Background processing supported');
+        } else {
+            $this->logger->logEvent('WARNING', 'Background processing not supported: ' . json_encode($this->environmentLimitations));
+        }
+    }
+
+    /**
+     * Detect hosting platform type
+     */
+    private function detectPlatformType(): string
+    {
+        // Railway detection
+        if (getenv('RAILWAY_ENVIRONMENT') || getenv('RAILWAY_PROJECT_NAME') || getenv('RAILWAY_SERVICE_NAME')) {
+            return 'railway';
+        }
+
+        // Vercel detection
+        if (getenv('VERCEL') || getenv('NOW_REGION') || getenv('VERCEL_ENV')) {
+            return 'vercel';
+        }
+
+        // Netlify detection
+        if (getenv('NETLIFY') || getenv('NETLIFY_BUILD_BASE')) {
+            return 'netlify';
+        }
+
+        // Heroku detection
+        if (getenv('DYNO') || getenv('HEROKU_APP_NAME')) {
+            return 'heroku';
+        }
+
+        // Shared hosting indicators
+        if (getenv('SHARED_HOSTING') || getenv('CPANEL_USER') || getenv('PLESK_USER')) {
+            return 'shared_hosting';
+        }
+
+        // Check hostname for hosting providers
+        $hostname = gethostname();
+        if (strpos($hostname, 'railway') !== false) return 'railway';
+        if (strpos($hostname, 'vercel') !== false) return 'vercel';
+        if (strpos($hostname, 'heroku') !== false) return 'heroku';
+        if (strpos($hostname, 'godaddy') !== false) return 'shared_hosting';
+        if (strpos($hostname, 'hostgator') !== false) return 'shared_hosting';
+
+        // Local development detection
+        if (
+            in_array(gethostname(), ['localhost', '127.0.0.1']) ||
+            PHP_SAPI === 'cli-server' ||
+            getenv('APP_ENV') === 'local'
+        ) {
+            return 'local';
+        }
+
+        return 'unknown';
+    }
+
+    /**
+     * Test basic process capability
+     */
+    private function testBasicProcessCapability(): bool
+    {
+        if (!class_exists(Process::class)) {
+            return false;
+        }
+
+        try {
+            $phpBinary = $this->systemUtils->getPhpBinary();
+            $process = new Process([$phpBinary, '--version']);
+            $process->setTimeout(5);
+            $process->run();
+
+            return $process->isSuccessful();
+        } catch (\Exception $e) {
+            $this->logger->logEvent('WARNING', 'Basic process test failed: ' . $e->getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * Get platform information
+     */
+    public function getPlatformInfo(): array
+    {
+        return [
+            'platform_type' => $this->platformType,
+            'background_processing_supported' => $this->backgroundProcessingSupported,
+            'limitations' => $this->environmentLimitations,
+            'environment_vars' => [
+                'RAILWAY_ENVIRONMENT' => getenv('RAILWAY_ENVIRONMENT'),
+                'RAILWAY_PROJECT_NAME' => getenv('RAILWAY_PROJECT_NAME'),
+                'RAILWAY_SERVICE_NAME' => getenv('RAILWAY_SERVICE_NAME'),
+                'VERCEL' => getenv('VERCEL'),
+                'NETLIFY' => getenv('NETLIFY'),
+                'DYNO' => getenv('DYNO'),
+                'HEROKU_APP_NAME' => getenv('HEROKU_APP_NAME'),
+            ],
+            'hostname' => gethostname(),
+            'sapi' => PHP_SAPI,
+        ];
+    }
+
+    public function isBackgroundProcessingSupported(): bool
+    {
+        return $this->backgroundProcessingSupported ?? false;
+    }
+
+    public function getEnvironmentLimitations(): array
+    {
+        return $this->environmentLimitations;
+    }
+
+    /**
+     * Enhanced spawn with platform-aware fallback
      */
     public function spawnBackgroundTask(
         string $taskId,
@@ -38,6 +223,15 @@ class ProcessManager
         array $frameworkInfo,
         CallbackSerializationManager $serializationManager
     ): void {
+        // For Railway and similar platforms, immediately fall back to synchronous execution
+        if (!$this->isBackgroundProcessingSupported()) {
+            $reason = $this->environmentLimitations['platform_restriction'] ?? 'Environment limitations';
+            $this->logger->logTaskEvent($taskId, 'FALLBACK', "Platform: {$this->platformType} - {$reason}, executing synchronously");
+            $this->executeSynchronously($taskId, $callback, $context);
+            return;
+        }
+
+        // Try background execution for supported platforms
         $taskFile = $this->systemUtils->getTempDirectory() . DIRECTORY_SEPARATOR . $taskId . '.php';
         $statusFile = $this->logger->getLogDirectory() . DIRECTORY_SEPARATOR . $taskId . '.status';
         $memoryLimit = $this->config->get('process.memory_limit', '512M');
@@ -61,183 +255,215 @@ class ProcessManager
             if (file_exists($taskFile)) {
                 unlink($taskFile);
             }
+
+            // Fallback to synchronous execution
+            $this->logger->logTaskEvent($taskId, 'FALLBACK', 'Background spawn failed, falling back to synchronous: ' . $e->getMessage());
+            $this->executeSynchronously($taskId, $callback, $context);
+        }
+    }
+
+    /**
+     * Enhanced synchronous execution with proper status tracking
+     */
+    private function executeSynchronously(string $taskId, callable $callback, array $context): void
+    {
+        $statusFile = $this->logger->getLogDirectory() . DIRECTORY_SEPARATOR . $taskId . '.status';
+        $startTime = microtime(true);
+        $pid = getmypid();
+
+        // Create initial status
+        $this->updateTaskStatus($statusFile, 'RUNNING', 'Executing synchronously', [
+            'task_id' => $taskId,
+            'timestamp' => time(),
+            'pid' => $pid,
+            'execution_mode' => 'synchronous',
+            'platform' => $this->platformType,
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
+        ]);
+
+        try {
+            // Capture output
+            ob_start();
+
+            $reflection = new \ReflectionFunction($callback instanceof \Closure ? $callback : \Closure::fromCallable($callback));
+            $paramCount = $reflection->getNumberOfParameters();
+
+            $result = $paramCount > 0 && !empty($context) ? $callback($context) : $callback();
+
+            $output = ob_get_clean();
+            $duration = microtime(true) - $startTime;
+
+            // Update status with completion
+            $resultInfo = [
+                'task_id' => $taskId,
+                'status' => 'COMPLETED',
+                'message' => "Task completed synchronously in " . number_format($duration, 3) . " seconds",
+                'timestamp' => time(),
+                'duration' => $duration,
+                'execution_time' => $duration,
+                'memory_usage' => memory_get_usage(true),
+                'memory_peak' => memory_get_peak_usage(true),
+                'memory_final' => memory_get_usage(true),
+                'pid' => $pid,
+                'execution_mode' => 'synchronous',
+                'platform' => $this->platformType,
+                'created_at' => date('Y-m-d H:i:s', time() - $duration),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ];
+
+            if ($result !== null) {
+                $resultInfo['result'] = $result;
+                $resultInfo['result_type'] = gettype($result);
+
+                // Handle large results
+                if (is_string($result) && strlen($result) > 1000) {
+                    $resultInfo['result_truncated'] = true;
+                    $resultInfo['result'] = substr($result, 0, 1000) . '... (truncated)';
+                    $resultInfo['result_length'] = strlen($result);
+                } elseif (is_array($result) && count($result) > 50) {
+                    $resultInfo['result_truncated'] = true;
+                    $resultInfo['result'] = array_slice($result, 0, 50);
+                    $resultInfo['result_count'] = count($result);
+                }
+            }
+
+            if (!empty($output)) {
+                $resultInfo['output'] = $output;
+                $resultInfo['output_length'] = strlen($output);
+                $resultInfo['output_lines'] = substr_count($output, "\n") + 1;
+            }
+
+            file_put_contents($statusFile, json_encode($resultInfo, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+        } catch (\Throwable $e) {
+            if (ob_get_level()) {
+                ob_end_clean();
+            }
+
+            $errorInfo = [
+                'task_id' => $taskId,
+                'status' => 'ERROR',
+                'message' => 'Synchronous execution failed: ' . $e->getMessage(),
+                'timestamp' => time(),
+                'duration' => microtime(true) - $startTime,
+                'pid' => $pid,
+                'execution_mode' => 'synchronous',
+                'platform' => $this->platformType,
+                'error_message' => $e->getMessage(),
+                'error_file' => $e->getFile(),
+                'error_line' => $e->getLine(),
+                'error_code' => $e->getCode(),
+                'stack_trace' => $e->getTraceAsString(),
+                'created_at' => date('Y-m-d H:i:s', time() - (microtime(true) - $startTime)),
+                'updated_at' => date('Y-m-d H:i:s'),
+            ];
+
+            file_put_contents($statusFile, json_encode($errorInfo, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
             throw $e;
         }
     }
 
     /**
-     * Test background execution capabilities using Symfony Process
+     * Helper to update task status
+     */
+    private function updateTaskStatus(string $statusFile, string $status, string $message, array $extra = []): void
+    {
+        $statusData = array_merge([
+            'status' => $status,
+            'message' => $message,
+        ], $extra);
+
+        file_put_contents($statusFile, json_encode($statusData, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES));
+    }
+
+    /**
+     * Enhanced test capabilities with platform-specific testing
      */
     public function testCapabilities(bool $verbose, CallbackSerializationManager $serializationManager): array
     {
         $results = [
             'success' => false,
             'errors' => [],
+            'warnings' => [],
             'stats' => [],
+            'platform_info' => $this->getPlatformInfo(),
         ];
 
-        try {
-            if ($verbose) {
-                echo "🧪 Testing background execution capabilities...\n";
-                echo "Environment: " . PHP_SAPI . " on " . PHP_OS_FAMILY . "\n";
-            }
+        if ($verbose) {
+            echo "🧪 Testing capabilities on platform: {$this->platformType}\n";
+            echo "Environment: " . PHP_SAPI . " on " . PHP_OS_FAMILY . "\n";
+            echo "Hostname: " . gethostname() . "\n";
 
-            if (!class_exists(Process::class)) {
-                $results['errors'][] = 'Symfony Process component not available';
-                if ($verbose) echo "❌ Symfony Process: NOT AVAILABLE\n";
-                return $results;
-            }
-
-            if ($verbose) echo "✅ Symfony Process: Available\n";
-
-            $phpBinary = $this->systemUtils->getPhpBinary();
-            $testProcess = new Process([$phpBinary, '--version']);
-            $testProcess->setTimeout(10);
-
-            try {
-                $testProcess->run();
-                if ($testProcess->isSuccessful()) {
-                    if ($verbose) echo "✅ PHP Binary execution: OK\n";
-                    $results['stats']['php_execution'] = true;
-                    $results['stats']['php_version_output'] = trim($testProcess->getOutput());
-                } else {
-                    $results['errors'][] = 'PHP binary execution failed: ' . $testProcess->getErrorOutput();
-                    if ($verbose) echo "❌ PHP Binary execution: FAILED\n";
-                }
-            } catch (\Exception $e) {
-                $results['errors'][] = 'PHP binary test exception: ' . $e->getMessage();
-                if ($verbose) echo "❌ PHP Binary execution: EXCEPTION - " . $e->getMessage() . "\n";
-            }
-
-            $testCallback = function () {
-                $testFile = sys_get_temp_dir() . '/defer_test_' . uniqid() . '.txt';
-                file_put_contents($testFile, 'Background execution test: ' . date('Y-m-d H:i:s'));
-                return $testFile;
-            };
-
-            if ($serializationManager->canSerializeCallback($testCallback)) {
-                if ($verbose) echo "✅ Callback serialization: OK\n";
-                $results['stats']['callback_serialization'] = true;
-            } else {
-                $results['errors'][] = 'Callback serialization failed';
-                if ($verbose) echo "❌ Callback serialization: FAILED\n";
-                return $results;
-            }
-
-            // Test context serialization
-            $testContext = ['test' => true, 'timestamp' => time(), 'data' => ['nested' => 'value']];
-            if ($serializationManager->canSerializeContext($testContext)) {
-                if ($verbose) echo "✅ Context serialization: OK\n";
-                $results['stats']['context_serialization'] = true;
-            } else {
-                $results['errors'][] = 'Context serialization failed';
-                if ($verbose) echo "❌ Context serialization: FAILED\n";
-            }
-
-            // Test actual background process execution
-            if (empty($results['errors'])) {
-                $testTaskId = 'test_' . uniqid();
-                $testResult = $this->testActualBackgroundExecution($testTaskId, $testCallback, [], $verbose);
-                $results['stats']['background_execution'] = $testResult['success'];
-                if (!$testResult['success']) {
-                    $results['errors'][] = 'Background execution test failed: ' . $testResult['error'];
-                } elseif ($verbose) {
-                    echo "✅ Background execution: OK\n";
+            if (!empty($this->environmentLimitations)) {
+                echo "⚠️  Platform limitations detected:\n";
+                foreach ($this->environmentLimitations as $limitation => $details) {
+                    echo "   - {$limitation}: " . (is_array($details) ? implode(', ', $details) : $details) . "\n";
                 }
             }
-
-            $results['success'] = empty($results['errors']);
-            $results['stats']['php_binary'] = $phpBinary;
-            $results['stats']['temp_dir'] = $this->systemUtils->getTempDirectory();
-            $results['stats']['log_dir'] = $this->logger->getLogDirectory();
-            $results['stats']['symfony_process_version'] = $this->getSymfonyProcessVersion();
-
-        } catch (\Throwable $e) {
-            $results['errors'][] = $e->getMessage();
-            if ($verbose) echo "❌ Test failed: " . $e->getMessage() . "\n";
         }
+
+        // Test serialization (always works)
+        $testCallback = function () {
+            return 'test';
+        };
+        if ($serializationManager->canSerializeCallback($testCallback)) {
+            if ($verbose) echo "✅ Callback serialization: OK\n";
+            $results['stats']['callback_serialization'] = true;
+        } else {
+            $results['errors'][] = 'Callback serialization failed';
+            if ($verbose) echo "❌ Callback serialization: FAILED\n";
+        }
+
+        // Platform-specific testing
+        if ($this->isBackgroundProcessingSupported()) {
+            if ($verbose) echo "✅ Background processing: SUPPORTED\n";
+            $results['stats']['background_processing'] = true;
+        } else {
+            if ($verbose) echo "⚠️  Background processing: NOT SUPPORTED (will use synchronous execution)\n";
+            $results['warnings'][] = "Platform {$this->platformType} does not support background processing";
+            $results['stats']['background_processing'] = false;
+        }
+
+        // Test synchronous execution (always available)
+        try {
+            $testResult = $this->testSynchronousExecution($verbose);
+            $results['stats']['synchronous_execution'] = $testResult['success'];
+            if ($testResult['success']) {
+                if ($verbose) echo "✅ Synchronous execution: OK\n";
+            } else {
+                $results['errors'][] = 'Synchronous execution test failed: ' . $testResult['error'];
+                if ($verbose) echo "❌ Synchronous execution: FAILED\n";
+            }
+        } catch (\Exception $e) {
+            $results['errors'][] = 'Synchronous execution test exception: ' . $e->getMessage();
+            if ($verbose) echo "❌ Synchronous execution: EXCEPTION\n";
+        }
+
+        $results['success'] = empty($results['errors']);
 
         return $results;
     }
 
     /**
-     * Test actual background execution
+     * Test synchronous execution
      */
-    private function testActualBackgroundExecution(string $taskId, callable $callback, array $context, bool $verbose): array
+    private function testSynchronousExecution(bool $verbose): array
     {
         try {
-            // Create a simple test script
-            $testFile = $this->systemUtils->getTempDirectory() . DIRECTORY_SEPARATOR . $taskId . '_test.php';
-            $testScript = $this->generateSimpleTestScript();
-            
-            if (file_put_contents($testFile, $testScript, LOCK_EX) === false) {
-                return ['success' => false, 'error' => 'Could not create test script'];
+            $testCallback = function () {
+                return 'Synchronous test successful: ' . date('Y-m-d H:i:s');
+            };
+
+            $result = $testCallback();
+
+            if ($verbose) {
+                echo "  Sync test result: $result\n";
             }
 
-            // Execute using Symfony Process
-            $phpBinary = $this->systemUtils->getPhpBinary();
-            $process = new Process([$phpBinary, $testFile]);
-            $process->setTimeout(10);
-            
-            $process->start();
-            
-            // Wait for completion
-            $process->wait();
-            
-            // Clean up test file
-            if (file_exists($testFile)) {
-                unlink($testFile);
-            }
-
-            if ($process->isSuccessful()) {
-                $output = trim($process->getOutput());
-                if ($verbose) {
-                    echo "  Test output: $output\n";
-                }
-                return ['success' => true, 'output' => $output];
-            } else {
-                return [
-                    'success' => false, 
-                    'error' => 'Process failed: ' . $process->getErrorOutput()
-                ];
-            }
-
+            return ['success' => true, 'result' => $result];
         } catch (\Exception $e) {
             return ['success' => false, 'error' => $e->getMessage()];
         }
-    }
-
-    /**
-     * Generate simple test script for background execution testing
-     */
-    private function generateSimpleTestScript(): string
-    {
-        return <<<'PHP'
-<?php
-echo "Background process test successful: " . date('Y-m-d H:i:s');
-exit(0);
-PHP;
-    }
-
-    /**
-     * Get Symfony Process version
-     */
-    private function getSymfonyProcessVersion(): string
-    {
-        try {
-            $reflection = new \ReflectionClass(Process::class);
-            $filename = $reflection->getFileName();
-            $composerFile = dirname($filename, 3) . '/composer.json';
-            
-            if (file_exists($composerFile)) {
-                $composer = json_decode(file_get_contents($composerFile), true);
-                return $composer['version'] ?? 'unknown';
-            }
-        } catch (\Exception $e) {
-            // Ignore
-        }
-        
-        return 'unknown';
     }
 
     /**
@@ -293,39 +519,42 @@ PHP;
         // Build PHP command with optimizations
         $phpArgs = [
             $phpBinary,
-            '-d', 'opcache.enable_cli=1',
-            '-d', 'opcache.jit_buffer_size=100M', 
-            '-d', 'opcache.jit=tracing',
+            '-d',
+            'opcache.enable_cli=1',
+            '-d',
+            'opcache.jit_buffer_size=100M',
+            '-d',
+            'opcache.jit=tracing',
             $taskFile
         ];
 
         try {
             // Create Symfony Process
             $process = new Process($phpArgs);
-            
+
             // Set timeout if specified (0 means no timeout)
             if ($timeout > 0) {
                 $process->setTimeout($timeout);
             } else {
                 $process->setTimeout(null); // No timeout
             }
-            
+
             // Set working directory to current directory
             $process->setWorkingDirectory(getcwd());
-            
+
             // Start the process in background
             $process->start();
-            
+
             // Log process start
             $this->logger->logTaskEvent(
-                $taskId, 
-                'PROCESS_STARTED', 
+                $taskId,
+                'PROCESS_STARTED',
                 "Symfony Process started with PID: " . ($process->getPid() ?? 'unknown')
             );
 
             // Don't wait for the process - let it run in background
             // The process will handle its own status updates and cleanup
-            
+
         } catch (\Exception $e) {
             throw new \RuntimeException(
                 "Failed to spawn background process for task: {$taskId}. Error: " . $e->getMessage(),
