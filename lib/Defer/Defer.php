@@ -37,26 +37,13 @@ class Defer
 
     /**
      * Terminate-scoped defer - executes after response is sent
+     *
+     * @param callable $callback The callback to execute
+     * @param bool $always Whether to execute even on 4xx/5xx status codes
      */
-    public static function terminate(callable $callback, bool $forceBackground = false, array $context = []): ?string
+    public static function terminate(callable $callback, bool $always = false): void
     {
-        return self::getHandler()->terminate($callback, $forceBackground, $context);
-    }
-
-    /**
-     * Execute a background task
-     */
-    public static function background(callable $callback, array $context = []): string
-    {
-        return self::getHandler()->executeBackground($callback, $context);
-    }
-
-    /**
-     * Create a lazy background task
-     */
-    public static function lazy(callable $callback, array $context = []): string
-    {
-        return LazyTask::create($callback, $context);
+        self::getHandler()->terminate($callback, $always);
     }
 
     /**

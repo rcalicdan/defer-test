@@ -21,6 +21,22 @@ class Process
     }
 
     /**
+     * Spawn and Execute a background task and return an unique task ID
+     */
+    public static function spawn(callable $callback, array $context = []): string
+    {
+        return self::getHandler()->executeBackground($callback, $context);
+    }
+
+    /**
+     * Create a lazy background task that only execute when awaited
+     */
+    public function lazy(string $taskId)
+    {
+        return LazyTask::create($taskId);
+    }
+
+    /**
      * Monitor a task until completion or timeout
      */
     public static function monitor(string $taskId, int $timeoutSeconds = 30, ?callable $progressCallback = null): array
@@ -57,7 +73,6 @@ class Process
             }
 
             usleep(10000);
-
         } while (true);
     }
 

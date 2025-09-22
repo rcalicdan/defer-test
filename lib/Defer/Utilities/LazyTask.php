@@ -3,6 +3,7 @@
 namespace Library\Defer\Utilities;
 
 use Library\Defer\Defer;
+use Library\Defer\Process;
 
 class LazyTask
 {
@@ -55,7 +56,7 @@ class LazyTask
     public function execute(): string
     {
         if (!$this->executed) {
-            $this->realTaskId = Defer::background($this->callback, $this->context);
+            $this->realTaskId = Process::spawn($this->callback, $this->context);
             $this->executed = true;
         }
         

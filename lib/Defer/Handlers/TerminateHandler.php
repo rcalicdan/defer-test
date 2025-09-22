@@ -5,34 +5,39 @@ namespace Library\Defer\Handlers;
 class TerminateHandler
 {
     /**
-     * @var array<callable> Terminate callbacks (executed after response)
+     * @var array Terminate callbacks (executed after response)
      */
-    private array $terminateStack = [];
+    protected array $terminateStack = [];
 
     /**
      * @var bool Whether terminate handlers are registered
      */
-    private bool $handlersRegistered = false;
+    protected bool $handlersRegistered = false;
 
     /**
-     * Add a terminate callback (traditional method)
+     * Add a terminate callback
      *
      * @param callable $callback The callback to add
+     * @param bool $always Whether to execute even on 4xx/5xx status codes
      */
-    public function addCallback(callable $callback): void
+    public function addCallback(callable $callback, bool $always = false): void
     {
         if (count($this->terminateStack) >= 50) {
             array_shift($this->terminateStack);
         }
 
-        $this->terminateStack[] = $callback;
+        $this->terminateStack[] = [
+            'callback' => $callback,
+            'always' => $always,
+        ];
+        
         $this->registerHandlers();
     }
 
     /**
      * Register terminate handlers based on environment
      */
-    private function registerHandlers(): void
+    protected function registerHandlers(): void
     {
         if ($this->handlersRegistered) {
             return;
@@ -54,7 +59,7 @@ class TerminateHandler
     /**
      * Check if running in FastCGI environment
      */
-    private function isFastCgiEnvironment(): bool
+    protected function isFastCgiEnvironment(): bool
     {
         return PHP_SAPI === 'fpm-fcgi' ||
             PHP_SAPI === 'cgi-fcgi' ||
@@ -64,13 +69,15 @@ class TerminateHandler
     /**
      * Register FastCGI terminate handler
      */
-    private function registerFastCgiHandler(): void
+    protected function registerFastCgiHandler(): void
     {
         register_shutdown_function(function () {
+            // Finish the FastCGI request first (sends response to client)
             if (function_exists('fastcgi_finish_request')) {
                 fastcgi_finish_request();
             }
 
+            // Then execute terminate callbacks
             $this->executeCallbacks();
         });
     }
@@ -78,26 +85,20 @@ class TerminateHandler
     /**
      * Register CLI terminate handler
      */
-    private function registerCliHandler(): void
+    protected function registerCliHandler(): void
     {
-        register_tick_function(function () {
-            static $executed = false;
-
-            if (!$executed && $this->isScriptEnding()) {
-                $executed = true;
-                $this->executeCallbacks();
-            }
+        register_shutdown_function(function () {
+            $this->executeCallbacks();
         });
-
-        declare(ticks=100);
     }
 
     /**
      * Register development server handler
      */
-    private function registerDevServerHandler(): void
+    protected function registerDevServerHandler(): void
     {
         register_shutdown_function(function () {
+            // Flush all output buffers to send response
             if (ob_get_level() > 0) {
                 while (ob_get_level() > 0) {
                     ob_end_flush();
@@ -105,6 +106,7 @@ class TerminateHandler
             }
             flush();
 
+            // Then execute terminate callbacks
             $this->executeCallbacks();
         });
     }
@@ -112,29 +114,22 @@ class TerminateHandler
     /**
      * Register fallback terminate handler
      */
-    private function registerFallbackHandler(): void
+    protected function registerFallbackHandler(): void
     {
         if (ob_get_level() === 0) {
             ob_start();
         }
 
         register_shutdown_function(function () {
+            // Flush output to send response
             while (ob_get_level() > 0) {
                 ob_end_flush();
             }
+            flush();
 
+            // Then execute terminate callbacks
             $this->executeCallbacks();
         });
-    }
-
-    /**
-     * Check if script is ending (for CLI)
-     */
-    private function isScriptEnding(): bool
-    {
-        $backtrace = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 2);
-        return empty($backtrace) ||
-            (count($backtrace) === 1 && !isset($backtrace[0]['function']));
     }
 
     /**
@@ -146,11 +141,19 @@ class TerminateHandler
             return;
         }
 
+        $statusCode = $this->getHttpResponseCode();
+        $shouldSkipOnError = $this->shouldSkipOnErrorStatus($statusCode);
+
         try {
-            foreach ($this->terminateStack as $index => $callback) {
+            foreach ($this->terminateStack as $index => $item) {
                 try {
-                    if (is_callable($callback)) {
-                        $callback();
+                    // Skip execution if it's an error status and callback is not marked as 'always'
+                    if ($shouldSkipOnError && !$item['always']) {
+                        continue;
+                    }
+
+                    if (is_callable($item['callback'])) {
+                        $item['callback']();
                     }
                 } catch (\Throwable $e) {
                     error_log('Terminate callback error: ' . $e->getMessage());
@@ -161,6 +164,35 @@ class TerminateHandler
         } finally {
             $this->terminateStack = [];
         }
+    }
+
+    /**
+     * Get HTTP response code (protected so it can be overridden for testing)
+     */
+    protected function getHttpResponseCode(): int
+    {
+        // For CLI, always return 200
+        if (PHP_SAPI === 'cli') {
+            return 200;
+        }
+
+        // Try to get the response code
+        $code = http_response_code();
+        
+        // If no code has been set, default to 200
+        if ($code === false) {
+            return 200;
+        }
+
+        return $code;
+    }
+
+    /**
+     * Determine if we should skip execution on error status codes
+     */
+    protected function shouldSkipOnErrorStatus(int $statusCode): bool
+    {
+        return $statusCode >= 400 && $statusCode < 600;
     }
 
     /**
@@ -181,17 +213,7 @@ class TerminateHandler
             'fastcgi' => $this->isFastCgiEnvironment(),
             'fastcgi_finish_request' => function_exists('fastcgi_finish_request'),
             'output_buffering' => ob_get_level() > 0,
+            'current_response_code' => $this->getHttpResponseCode(),
         ];
-    }
-
-    /**
-     * Determine if background execution should be used
-     */
-    public function shouldUseBackgroundExecution(): bool
-    {
-        return PHP_SAPI === 'cli-server' || // Built-in dev server
-            PHP_SAPI === 'cli' ||        // CLI environment
-            !function_exists('fastcgi_finish_request') || // No FastCGI
-            !$this->isFastCgiEnvironment(); // Not in FastCGI environment
     }
 }

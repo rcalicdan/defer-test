@@ -77,7 +77,7 @@ class ProcessPool
             $task = array_shift($this->queuedTasks);
 
             try {
-                $taskId = Defer::background($task['callback'], $task['context']);
+                $taskId = Process::spawn($task['callback'], $task['context']);
                 
                 $this->allTaskIds[$task['key']] = $taskId;
                 

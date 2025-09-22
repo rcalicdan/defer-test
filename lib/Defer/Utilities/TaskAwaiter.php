@@ -49,9 +49,9 @@ class TaskAwaiter
                         throw new \RuntimeException("Lazy task not found: {$item}");
                     }
                 } elseif (is_callable($item)) {
-                    $actualTaskIds[$key] = Defer::background($item);
+                    $actualTaskIds[$key] = Process::spawn($item);
                 } elseif (is_array($item) && isset($item['callback'])) {
-                    $actualTaskIds[$key] = Defer::background($item['callback'], $item['context'] ?? []);
+                    $actualTaskIds[$key] = Process::spawn($item['callback'], $item['context'] ?? []);
                 } else {
                     $actualTaskIds[$key] = $item; // Assume it's already a task ID
                 }
@@ -236,9 +236,9 @@ class TaskAwaiter
                         throw new \RuntimeException("Lazy task not found: {$item}");
                     }
                 } elseif (is_callable($item)) {
-                    $actualTaskIds[$key] = Defer::background($item);
+                    $actualTaskIds[$key] = Process::spawn($item);
                 } elseif (is_array($item) && isset($item['callback'])) {
-                    $actualTaskIds[$key] = Defer::background($item['callback'], $item['context'] ?? []);
+                    $actualTaskIds[$key] = Process::spawn($item['callback'], $item['context'] ?? []);
                 } else {
                     $actualTaskIds[$key] = $item;
                 }

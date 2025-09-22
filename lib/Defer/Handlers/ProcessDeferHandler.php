@@ -53,25 +53,14 @@ class ProcessDeferHandler
     }
 
     /**
-     * Add a terminate callback with optional background execution
+     * Add a terminate callback (executes after response is sent)
+     *
+     * @param callable $callback The callback to execute
+     * @param bool $always Whether to execute even on 4xx/5xx status codes
      */
-    public function terminate(callable $callback, bool $forceBackground = false, array $context = []): ?string
+    public function terminate(callable $callback, bool $always = false): void
     {
-        // Check if we should use background process execution
-        if ($forceBackground || $this->terminateHandler->shouldUseBackgroundExecution()) {
-            try {
-                return $this->backgroundTaskManager->execute($callback, $context);
-            } catch (\Throwable $e) {
-                error_log('Background execution failed, falling back to shutdown function: ' . $e->getMessage());
-                // Fallback to traditional method
-                $this->terminateHandler->addCallback($callback);
-                throw $e;
-            }
-        } else {
-            // Use traditional method
-            $this->terminateHandler->addCallback($callback);
-            return null; // No task ID for traditional execution
-        }
+        $this->terminateHandler->addCallback($callback, $always);
     }
 
     /**
@@ -193,7 +182,7 @@ class ProcessDeferHandler
     }
 
     /**
-     * Enhanced statistics including background execution capabilities
+     * Enhanced statistics
      */
     public function getStats(): array
     {
@@ -201,7 +190,6 @@ class ProcessDeferHandler
             'global_defers' => count(self::$globalStack),
             'terminate_callbacks' => $this->terminateHandler->getCallbackCount(),
             'memory_usage' => memory_get_usage(true),
-            'background_execution' => $this->terminateHandler->shouldUseBackgroundExecution(),
         ];
 
         $backgroundStats = $this->backgroundTaskManager->getStats();
